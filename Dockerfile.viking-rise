@@ -1,0 +1,60 @@
+# Viking Rise Steam-client container (proof-of-concept, not final architecture).
+#
+# Steam client (manual login only, see viking-rise-entrypoint.sh) plus Mesa
+# userspace drivers matching the host's kernel amdgpu module, rendering
+# through the host's /dev/dri/renderD128 render node.
+#
+# Base image: Ubuntu 22.04. Chosen over Debian because Valve officially
+# supports and QA-tests the desktop Steam client against Ubuntu, and
+# Ubuntu's "multiverse" component carries the same "steam-installer" .deb
+# Debian ships in contrib/non-free - on Ubuntu it only takes one
+# `add-apt-repository multiverse` call, instead of hand-editing apt sources
+# to enable contrib+non-free on Debian. Simpler to get right and reproduce
+# reliably in a Containerfile for an MVP.
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# The Steam client itself ships as a 32-bit binary; steam-installer and its
+# Mesa dependencies need the i386 architecture enabled alongside amd64.
+RUN dpkg --add-architecture i386
+
+# Pre-accept the steam-installer .deb's license prompt so the build runs
+# non-interactively. This is the package postinst's software EULA checkbox
+# (debconf template "steam:steam/question"), NOT a Steam account login -
+# no Steam credentials, tokens, or accounts are involved at any point here.
+RUN echo steam steam/question select "I AGREE" | debconf-set-selections \
+    && echo steam steam/license note '' | debconf-set-selections
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends software-properties-common \
+    && add-apt-repository -y multiverse \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        steam-installer \
+        xvfb \
+        x11vnc \
+        dbus \
+        mesa-vulkan-drivers \
+        mesa-vulkan-drivers:i386 \
+        mesa-va-drivers \
+        libgl1-mesa-dri \
+        libgl1-mesa-dri:i386 \
+        ca-certificates \
+        procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Steam refuses to run as root. steamuser's home (~/.steam,
+# ~/.local/share/Steam, and the logged-in session state) is the directory
+# the deploy script mounts as a persistent named volume.
+RUN useradd --create-home --shell /bin/bash steamuser
+
+COPY viking-rise-entrypoint.sh /usr/local/bin/viking-rise-entrypoint.sh
+RUN chmod +x /usr/local/bin/viking-rise-entrypoint.sh
+
+ENV VIKING_RISE_DISPLAY=:1
+# x11vnc port inside the container; the deploy script publishes this to
+# 127.0.0.1 only on the host side.
+EXPOSE 5900
+
+ENTRYPOINT ["/usr/local/bin/viking-rise-entrypoint.sh"]
