@@ -17,13 +17,13 @@ simple as possible on purpose.
 
 ## Files
 
-- `Dockerfile.viking-rise` (repo root) - builds the image. Named to match
-  the existing top-level `Dockerfile.router-web` convention rather than
-  `Containerfile.viking-rise`, for consistency within this repo.
+- `Dockerfile.viking-rise` (repo root) - builds the image. `podman build -f`
+  is explicit about the file, so the `Dockerfile.*` name is kept rather than
+  renamed to `Containerfile`; it carried over from the repository this
+  started in and there is no reason to churn it.
 - `viking-rise-entrypoint.sh` (repo root) - container entrypoint: machine-id
   regeneration, Xvfb, x11vnc, then Steam.
-- `deploy/viking-rise-podman.sh` - build + run script, modeled on
-  `deploy/router-web-podman.sh`.
+- `deploy/viking-rise-podman.sh` - build + run script.
 - `deploy/viking-rise.env.example` - documents the overridable variables.
   Copy to `deploy/viking-rise.env` for local overrides (gitignored). None of
   these values are secrets.
@@ -119,7 +119,7 @@ VNC currently has no password (`x11vnc -nopw`) and relies entirely on the
 ## Build and run
 
 ```bash
-cd /path/to/yolostaff   # repository root
+cd /path/to/viking-rise-podman   # repository root
 cp deploy/viking-rise.env.example deploy/viking-rise.env   # optional, to override defaults
 deploy/viking-rise-podman.sh
 ```
@@ -127,8 +127,10 @@ deploy/viking-rise-podman.sh
 The script:
 
 - Checks that `/dev/dri/renderD128` exists and is readable/writable.
-- Creates the `yolostaff-net` Podman network if missing (same network
-  `router-web-podman.sh` uses).
+- Creates the `yolostaff-net` Podman network if missing. That network is a
+  host-level resource shared with other containers on `steamdeck`; the name
+  is kept so this container lands on the same bridge, and is overridable via
+  `VIKING_RISE_NETWORK`.
 - Creates the `viking-rise-steam-data` named volume if missing.
 - Builds `Dockerfile.viking-rise`.
 - Runs the container, publishing VNC to `127.0.0.1:15900` (host) ->
@@ -168,11 +170,10 @@ user and warns explicitly instead of leaving it unexplained.
 
 `15900` was chosen for the VNC publish:
 
-- It doesn't collide with existing project ports 8080 (label-studio) or
-  18790 (router-web).
+- It doesn't collide with services already running on `steamdeck`: 8080
+  (label-studio) or 18790 (router-web).
 - It keeps the recognizable VNC `5900` suffix while sitting in the same
-  high `1xxxx` range as `18790`, so it reads as "belongs to this project"
-  at a glance.
+  high `1xxxx` range as the other services on that host.
 - It avoids clashing with a real VNC server that might already be running
   on the conventional `5900` port on the host itself.
 
