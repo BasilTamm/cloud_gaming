@@ -67,6 +67,29 @@ documentation for this use case.
   performance after a real deploy, and treat this as a likely next
   iteration.
 
+## Expected experience and its limits
+
+This stack is remote *desktop*, not game streaming, and that ceiling is
+structural rather than a tuning problem:
+
+- **No audio at all.** `x11vnc` carries framebuffer updates and input
+  events; it has no audio channel, and no sound server is installed in the
+  image. Expect a silent game.
+- **Input lag.** Every action is a round trip through the VNC protocol.
+  Fine for clicking menus, poor for anything reflex-driven.
+- **Not a smooth 60 FPS.** VNC transmits changed screen regions, so a
+  full-screen animated 3D scene is close to its worst case.
+
+For Viking Rise specifically - a strategy/management game driven by
+discrete clicks rather than reflexes, and playable muted - these limits are
+mostly tolerable, which is what makes the MVP worth trying at all.
+
+If the experience turns out to be insufficient after a real test, the
+natural next step is to stop using VNC for the game itself: **Sunshine +
+Moonlight** (hardware-encoded H.264/HEVC with audio and far lower latency)
+or **Steam Remote Play**, keeping this container as the thing that hosts
+the session. Both are out of scope here and neither has been tried.
+
 ## Steam packaging notes
 
 Verified against the Ubuntu 22.04 `steam` source package
