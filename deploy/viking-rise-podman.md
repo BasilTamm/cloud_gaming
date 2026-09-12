@@ -143,6 +143,27 @@ mounted from the `viking-rise-steam-data` named volume. As long as that
 volume isn't deleted (`podman volume rm`), a logged-in Steam session
 survives `podman rm`/recreate and host reboots.
 
+The mount point is derived from `VIKING_RISE_STEAM_USER` rather than
+hardcoded, so the volume always lands on the home directory of the account
+Steam actually runs as. Overriding that variable only works if the image
+contains the user - the stock `Dockerfile.viking-rise` creates `steamuser`
+and nothing else. On first start the entrypoint chowns the volume to that
+user once; later starts detect correct ownership and skip the recursive
+pass.
+
+## Privilege drop
+
+The container starts as root only long enough to regenerate
+`/etc/machine-id`, fix volume ownership, and start `Xvfb` and `x11vnc`. It
+then `exec`s Steam through `runuser` as the unprivileged user, because
+Steam refuses to run as root.
+
+One consequence is easy to miss: GPU access is evaluated as *that* user,
+not root. If `/dev/dri/renderD128` is passed through but is not
+readable/writable by it, the only symptom is a silently software-rendered
+(llvmpipe) game. The entrypoint therefore probes the device as the target
+user and warns explicitly instead of leaving it unexplained.
+
 ## Port choice
 
 `15900` was chosen for the VNC publish:
@@ -169,7 +190,8 @@ Actually verified:
   the `/usr/games/steam` path, the i386-only `steam` package, the
   `steam-installer` dependency shim, and the debconf template names/types.
 - `dbus-uuidgen` is shipped by the `dbus` package on jammy
-  (`/usr/bin/dbus-uuidgen`).
+  (`/usr/bin/dbus-uuidgen`), which is why `dbus` is installed. There is no
+  systemd here, so `systemd-machine-id-setup` is not an option.
 - No Steam credentials, tokens, or 2FA material appear anywhere in these
   files.
 
