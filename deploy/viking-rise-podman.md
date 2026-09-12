@@ -208,13 +208,23 @@ Consequences to keep in mind:
 
 ## What has and hasn't been verified
 
-This was prepared in an environment with **no `podman`, no `docker`, no
-`shellcheck`, and no `/dev/dri`**. Be precise about what that means.
+This was prepared in an environment with **no `podman`, no `docker`, and no
+`/dev/dri`**. Be precise about what that means.
 
 Actually verified:
 
 - `bash -n` (syntax-only parse) passes for `viking-rise-entrypoint.sh` and
   `deploy/viking-rise-podman.sh`.
+- **ShellCheck 0.10.0 reports zero findings** on both scripts
+  (`shellcheck -s bash`, exit 0). It is not installed in this environment;
+  the upstream static binary was run from a temporary directory.
+- Every package the image installs exists in Ubuntu 22.04 (jammy):
+  `steam-installer`, `xvfb`, `x11vnc`, `dbus`, `mesa-vulkan-drivers`,
+  `mesa-va-drivers`, `libgl1-mesa-dri`, `ca-certificates`, `procps`,
+  `fontconfig`, `fonts-liberation`, `software-properties-common`. The two
+  i386 variants the build depends on - `mesa-vulkan-drivers:i386` and
+  `libgl1-mesa-dri:i386` - are also published for i386 on jammy, which
+  matters because jammy ships only a whitelisted subset of i386 packages.
 - The Steam packaging facts in "Steam packaging notes" above, read directly
   from the Ubuntu `steam` source package and the jammy package file lists:
   the `/usr/games/steam` path, the i386-only `steam` package, the
@@ -235,7 +245,9 @@ Not verified - never executed, by anyone, yet:
   appears on the Xvfb display.
 - Steam itself: first-run bootstrap, the login screen, login, and whether
   Viking Rise launches or is playable at any framerate.
-- Whether `apt-get` resolves every listed package on a real jammy image
-  (package *existence* was checked; a full dependency solve was not).
+- Whether `apt-get` actually *resolves* the full set on a real jammy image.
+  Each package is confirmed to exist, but a real dependency solve - version
+  conflicts, i386/amd64 co-installability, `add-apt-repository multiverse`
+  succeeding in the build - was never run.
 
 Test on `steamdeck` before relying on this.

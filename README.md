@@ -25,9 +25,10 @@ session.
 
 ## Status
 
-Nothing here has ever been executed: the image has never been built and
-the container has never been started. `podman`, `docker`, and `shellcheck`
-were unavailable while it was written.
+The scripts are clean under `bash -n` and ShellCheck 0.10.0, and every apt
+package is confirmed to exist in Ubuntu 22.04. But **nothing here has ever
+been executed**: the image has never been built and the container has never
+been started — `podman` and `docker` were unavailable while it was written.
 
 Read **[`deploy/viking-rise-podman.md`](deploy/viking-rise-podman.md)** before
 running it — it documents the design decisions, the Steam packaging facts
