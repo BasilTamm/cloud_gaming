@@ -19,13 +19,25 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Mesa dependencies need the i386 architecture enabled alongside amd64.
 RUN dpkg --add-architecture i386
 
-# Pre-accept the steam-installer .deb's license prompt so the build runs
-# non-interactively. This is the package postinst's software EULA checkbox
-# (debconf template "steam:steam/question"), NOT a Steam account login -
-# no Steam credentials, tokens, or accounts are involved at any point here.
+# Pre-accept the Steam packaging's license prompt so the build stays
+# non-interactive. Verified against the Ubuntu "steam" source package
+# (debian/scripts/templates-helper): template "steam/question" is a select
+# with choices "I DECLINE, I AGREE", and "steam/license" is a note.
+#
+# This is the distro packaging's software EULA checkbox, NOT a Steam account
+# login - no Steam credentials, tokens, or accounts are involved anywhere in
+# this image.
 RUN echo steam steam/question select "I AGREE" | debconf-set-selections \
     && echo steam steam/license note '' | debconf-set-selections
 
+# steam-installer is an arch-independent shim depending on the real "steam"
+# package, which Ubuntu 22.04 ships for i386 only - hence the i386 setup
+# above. It installs the launcher as /usr/games/steam.
+#
+# --no-install-recommends keeps the image small, so the Recommends that
+# matter here are pulled in explicitly (Mesa drivers, fonts). Should a real
+# deploy show a missing piece of the Steam UI, the remaining Recommends
+# (libegl1, libgbm1, zenity, xdg-utils, libxss1) are the first candidates.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends software-properties-common \
     && add-apt-repository -y multiverse \
@@ -42,6 +54,8 @@ RUN apt-get update \
         libgl1-mesa-dri:i386 \
         ca-certificates \
         procps \
+        fontconfig \
+        fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Steam refuses to run as root. steamuser's home (~/.steam,
