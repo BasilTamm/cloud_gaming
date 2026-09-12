@@ -12,7 +12,6 @@
 set -euo pipefail
 
 STEAM_USER="${VIKING_RISE_STEAM_USER:-steamuser}"
-STEAM_HOME="$(getent passwd "$STEAM_USER" | cut -d: -f6)"
 DISPLAY_NUM="${VIKING_RISE_DISPLAY:-:1}"
 SCREEN_RES="${VIKING_RISE_SCREEN:-1280x800x24}"
 VNC_PORT="${VIKING_RISE_VNC_INTERNAL_PORT:-5900}"
@@ -21,6 +20,15 @@ RENDER_DEVICE="${VIKING_RISE_RENDER_DEVICE:-/dev/dri/renderD128}"
 # package's debian/steam.install), which is NOT on the default container
 # PATH. It must be invoked by absolute path.
 STEAM_BIN="${VIKING_RISE_STEAM_BIN:-/usr/games/steam}"
+
+# Resolved in two steps on purpose: under `set -e` with pipefail, a failing
+# `getent` inside a command substitution would abort the script before the
+# diagnostic below could run.
+if ! passwd_entry="$(getent passwd "$STEAM_USER")"; then
+  echo "No such user inside the container: '$STEAM_USER'." >&2
+  exit 1
+fi
+STEAM_HOME="$(cut -d: -f6 <<<"$passwd_entry")"
 
 if [[ -z "$STEAM_HOME" ]]; then
   echo "Cannot resolve home directory for user '$STEAM_USER'." >&2
@@ -68,6 +76,17 @@ if [[ ! -e "$X_SOCKET" ]]; then
 fi
 
 x11vnc -display "$DISPLAY_NUM" -forever -shared -rfbport "$VNC_PORT" -nopw -quiet &
+X11VNC_PID=$!
+
+# VNC is the only way in: manual Steam login happens there by design. A
+# silently dead x11vnc would leave an unreachable container running Steam,
+# so treat it as a fatal startup error instead.
+sleep 1
+if ! kill -0 "$X11VNC_PID" 2>/dev/null; then
+  echo "x11vnc failed to stay up on port $VNC_PORT (display $DISPLAY_NUM)." >&2
+  kill "$XVFB_PID" 2>/dev/null || true
+  exit 1
+fi
 
 # Steam refuses to run as root anyway; runuser also keeps GPU-device access
 # scoped to the unprivileged app user instead of root.
