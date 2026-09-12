@@ -2,3 +2,8 @@
 # tracked. No Steam credentials belong in this file - or anywhere in this
 # repository - but it is machine-local config and stays untracked.
 deploy/viking-rise.env
+
+# x11vnc password file, created locally with `x11vnc -storepasswd`. A VNC
+# password only - never a Steam credential - but still a secret, and it
+# must never be committed.
+deploy/viking-rise-vnc.passwd

@@ -112,9 +112,10 @@ must not change. After the container starts:
 3. Log into Steam by hand (including any 2FA prompt) directly in that VNC
    session.
 
-VNC currently has no password (`x11vnc -nopw`) and relies entirely on the
-`127.0.0.1`-only publish for protection. Do not change the bind address to
-`0.0.0.0`/a LAN address without adding real VNC authentication first.
+By default VNC has no password (`x11vnc -nopw`) and relies entirely on the
+`127.0.0.1`-only publish plus this container's own network. See
+[VNC authentication](#vnc-authentication) to add a password, and do not
+change the bind address to `0.0.0.0`/a LAN address without doing so first.
 
 ## Build and run
 
@@ -175,6 +176,35 @@ user and warns explicitly instead of leaving it unexplained.
   high `1xxxx` range as the other services on that host.
 - It avoids clashing with a real VNC server that might already be running
   on the conventional `5900` port on the host itself.
+
+## VNC authentication
+
+Optional, and off by default. Create a password file on the host:
+
+```bash
+x11vnc -storepasswd '<password>' deploy/viking-rise-vnc.passwd
+chmod 600 deploy/viking-rise-vnc.passwd
+```
+
+The deploy script picks it up automatically, mounts it read-only, and
+`x11vnc` then runs with `-rfbauth` instead of `-nopw`. The file is
+gitignored and the script refuses to start unless it is mode `600`. If the
+file is configured but unreadable inside the container the entrypoint exits
+rather than quietly falling back to an open session.
+
+This is a **VNC password only**. No Steam credential belongs in it, or
+anywhere else in this project - the Steam login stays manual.
+
+Treat it as a second layer, never the primary one. VNC's built-in scheme is
+DES-based, silently truncates the password to 8 characters, and runs over
+an unencrypted transport; anyone who can see the traffic can see the
+session. The loopback publish and the dedicated network remain the real
+controls.
+
+Without a password file, any local process on the host can reach
+`127.0.0.1:15900` and take over a logged-in Steam session. On a
+single-user machine that is usually acceptable for an MVP; decide
+deliberately rather than by default.
 
 ## Network isolation
 

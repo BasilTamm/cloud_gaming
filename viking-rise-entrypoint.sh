@@ -16,6 +16,10 @@ DISPLAY_NUM="${VIKING_RISE_DISPLAY:-:1}"
 SCREEN_RES="${VIKING_RISE_SCREEN:-1280x800x24}"
 VNC_PORT="${VIKING_RISE_VNC_INTERNAL_PORT:-5900}"
 RENDER_DEVICE="${VIKING_RISE_RENDER_DEVICE:-/dev/dri/renderD128}"
+# Path *inside the container* to an x11vnc password file. Empty means no
+# VNC authentication; see the VNC authentication section in
+# deploy/viking-rise-podman.md.
+VNC_PASSWD_FILE="${VIKING_RISE_VNC_PASSWD_FILE:-}"
 # Debian/Ubuntu ship the Steam launcher in /usr/games (see the steam
 # package's debian/steam.install), which is NOT on the default container
 # PATH. It must be invoked by absolute path.
@@ -82,7 +86,28 @@ if [[ ! -e "$X_SOCKET" ]]; then
   exit 1
 fi
 
-x11vnc -display "$DISPLAY_NUM" -forever -shared -rfbport "$VNC_PORT" -nopw -quiet &
+# Authentication is opt-in: a mounted password file enables -rfbauth, and
+# its absence is announced loudly rather than passing silently. A file that
+# was configured but cannot be read is fatal - falling back to an open
+# session because a mount went wrong is exactly the wrong failure mode.
+if [[ -n "$VNC_PASSWD_FILE" ]]; then
+  if [[ ! -r "$VNC_PASSWD_FILE" ]]; then
+    echo "VNC password file configured but not readable: $VNC_PASSWD_FILE" >&2
+    echo "Refusing to start an unauthenticated VNC session instead." >&2
+    kill "$XVFB_PID" 2>/dev/null || true
+    exit 1
+  fi
+  vnc_auth=(-rfbauth "$VNC_PASSWD_FILE")
+else
+  echo "Warning: VNC has no password (-nopw)." >&2
+  echo "Access control is the loopback publish plus this container's own network." >&2
+  echo "Any local process on the host can take over the Steam session." >&2
+  echo "See 'VNC authentication' in deploy/viking-rise-podman.md." >&2
+  vnc_auth=(-nopw)
+fi
+
+x11vnc -display "$DISPLAY_NUM" -forever -shared -rfbport "$VNC_PORT" \
+  "${vnc_auth[@]}" -quiet &
 X11VNC_PID=$!
 
 # VNC is the only way in: manual Steam login happens there by design. A

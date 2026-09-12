@@ -41,6 +41,11 @@ STEAM_USER="${VIKING_RISE_STEAM_USER:-steamuser}"
 STEAM_HOME="${VIKING_RISE_STEAM_HOME:-/home/${STEAM_USER}}"
 RENDER_DEVICE="${VIKING_RISE_RENDER_DEVICE:-/dev/dri/renderD128}"
 SCREEN_RES="${VIKING_RISE_SCREEN:-1280x800x24}"
+# Optional x11vnc password file on the host. Create it with:
+#   x11vnc -storepasswd <password> deploy/viking-rise-vnc.passwd
+# It is gitignored. This is a VNC password only - never a Steam credential.
+VNC_PASSWD_FILE="${VIKING_RISE_VNC_PASSWD_FILE:-deploy/viking-rise-vnc.passwd}"
+VNC_PASSWD_IN_CONTAINER="/run/viking-rise/vnc.passwd"
 
 if [[ ! -e "$RENDER_DEVICE" ]]; then
   echo "GPU render device not found: $RENDER_DEVICE" >&2
@@ -55,6 +60,27 @@ if [[ ! -r "$RENDER_DEVICE" || ! -w "$RENDER_DEVICE" ]]; then
   echo "Current user cannot read/write $RENDER_DEVICE." >&2
   echo "Expected world-readable/writable permissions (crw-rw-rw-)." >&2
   exit 1
+fi
+
+vnc_auth_args=()
+if [[ -e "$VNC_PASSWD_FILE" ]]; then
+  if ! permissions="$(stat -c '%a' "$VNC_PASSWD_FILE" 2>/dev/null)"; then
+    echo "Cannot determine permissions for $VNC_PASSWD_FILE." >&2
+    exit 1
+  fi
+  if [[ "$permissions" != "600" ]]; then
+    echo "Refusing to start: $VNC_PASSWD_FILE is a password file but is mode $permissions." >&2
+    echo "Run: chmod 600 $VNC_PASSWD_FILE" >&2
+    exit 1
+  fi
+  vnc_auth_args=(
+    --volume "$(realpath "$VNC_PASSWD_FILE"):${VNC_PASSWD_IN_CONTAINER}:ro,Z"
+    --env "VIKING_RISE_VNC_PASSWD_FILE=${VNC_PASSWD_IN_CONTAINER}"
+  )
+else
+  echo "Note: $VNC_PASSWD_FILE not found - VNC will run without a password." >&2
+  echo "Access control will be the loopback publish plus this container's own network." >&2
+  echo "To add one: x11vnc -storepasswd <password> $VNC_PASSWD_FILE && chmod 600 $VNC_PASSWD_FILE" >&2
 fi
 
 podman network exists "$NETWORK" || podman network create "$NETWORK"
@@ -78,6 +104,7 @@ podman run -d \
   --env "VIKING_RISE_SCREEN=${SCREEN_RES}" \
   --env "VIKING_RISE_RENDER_DEVICE=${RENDER_DEVICE}" \
   --env "VIKING_RISE_STEAM_USER=${STEAM_USER}" \
+  "${vnc_auth_args[@]}" \
   --restart unless-stopped \
   "$IMAGE"
 
