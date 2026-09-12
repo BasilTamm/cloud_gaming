@@ -26,7 +26,7 @@ fi
 # outbound internet and nothing more, so a network of its own costs nothing.
 NETWORK="${VIKING_RISE_NETWORK:-viking-rise-net}"
 CONTAINER="${VIKING_RISE_CONTAINER:-viking-rise-steam}"
-IMAGE="${VIKING_RISE_IMAGE:-yolostaff-viking-rise:latest}"
+IMAGE="${VIKING_RISE_IMAGE:-viking-rise-steam:latest}"
 BIND_ADDRESS="${VIKING_RISE_VNC_BIND:-127.0.0.1}"
 VNC_PORT="${VIKING_RISE_VNC_PORT:-15900}"
 DATA_VOLUME="${VIKING_RISE_DATA_VOLUME:-viking-rise-steam-data}"
