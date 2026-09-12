@@ -127,10 +127,9 @@ deploy/viking-rise-podman.sh
 The script:
 
 - Checks that `/dev/dri/renderD128` exists and is readable/writable.
-- Creates the `yolostaff-net` Podman network if missing. That network is a
-  host-level resource shared with other containers on `steamdeck`; the name
-  is kept so this container lands on the same bridge, and is overridable via
-  `VIKING_RISE_NETWORK`.
+- Creates the `viking-rise-net` Podman network if missing. This container
+  gets a network of its own and must not share one (see
+  [Network isolation](#network-isolation)).
 - Creates the `viking-rise-steam-data` named volume if missing.
 - Builds `Dockerfile.viking-rise`.
 - Runs the container, publishing VNC to `127.0.0.1:15900` (host) ->
@@ -176,6 +175,36 @@ user and warns explicitly instead of leaving it unexplained.
   high `1xxxx` range as the other services on that host.
 - It avoids clashing with a real VNC server that might already be running
   on the conventional `5900` port on the host itself.
+
+## Network isolation
+
+**Rule: this container gets a Podman network of its own and never shares
+one.** `viking-rise-net` exists for that and holds nothing else.
+
+Why: `x11vnc` runs with `-nopw` and listens on `0.0.0.0:5900` inside the
+container. The `--publish 127.0.0.1:15900:5900` bind restricts access
+arriving through the *host* only - it does nothing about traffic between
+containers on the same bridge. Anything co-attached can dial the container
+IP on port `5900` and get an unauthenticated, fully interactive session:
+silent keyboard and mouse control of a logged-in Steam client, and a view
+of the password and 2FA code as they are typed by hand over that same
+channel.
+
+So the bar for a co-tenant is not "is this service trusted today" but "is
+it acceptable for this service, at any future point, to own the Steam
+account". In practice nothing clears that bar, and Steam needs only
+outbound internet, so an unshared network costs nothing.
+
+Consequences to keep in mind:
+
+- The loopback publish and this network separation are currently the
+  *entire* access control. Anything that widens either one - binding to
+  `0.0.0.0`, joining another network, exposing the port through a tunnel -
+  needs real VNC authentication (`-rfbauth`, or `-localhost` plus an SSH
+  tunnel) added first.
+- Even with authentication, VNC's built-in scheme is DES-based and silently
+  truncates passwords to 8 characters, over an unencrypted transport. Treat
+  it as a second layer, never as the primary one.
 
 ## What has and hasn't been verified
 

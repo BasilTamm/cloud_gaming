@@ -18,7 +18,13 @@ if [[ -f "$ENV_FILE" ]]; then
   source "$ENV_FILE"
 fi
 
-NETWORK="${VIKING_RISE_NETWORK:-yolostaff-net}"
+# This container must not share a network with anything else. x11vnc
+# listens on 0.0.0.0:5900 inside the container with -nopw, so any
+# co-attached container reaches an unauthenticated, fully interactive VNC
+# session on the container IP; the loopback --publish below filters
+# host-side access only, not container-to-container traffic. Steam needs
+# outbound internet and nothing more, so a network of its own costs nothing.
+NETWORK="${VIKING_RISE_NETWORK:-viking-rise-net}"
 CONTAINER="${VIKING_RISE_CONTAINER:-viking-rise-steam}"
 IMAGE="${VIKING_RISE_IMAGE:-yolostaff-viking-rise:latest}"
 BIND_ADDRESS="${VIKING_RISE_VNC_BIND:-127.0.0.1}"
@@ -58,9 +64,11 @@ podman build -f Dockerfile.viking-rise -t "$IMAGE" .
 
 podman rm -f "$CONTAINER" 2>/dev/null || true
 
-# VNC is published to the host loopback interface only, by design - never
-# change BIND_ADDRESS to 0.0.0.0 without adding real VNC authentication
-# first (x11vnc runs with -nopw here).
+# VNC is published to the host loopback interface only, by design. Together
+# with the dedicated network above, that is the entire access control: x11vnc
+# runs with -nopw. Never change BIND_ADDRESS to 0.0.0.0, and never attach
+# this container to a shared network, without adding real VNC authentication
+# first - the Steam password and 2FA code are typed through this channel.
 podman run -d \
   --name "$CONTAINER" \
   --network "$NETWORK" \
