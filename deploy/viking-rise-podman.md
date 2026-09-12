@@ -22,7 +22,7 @@ simple as possible on purpose.
   renamed to `Containerfile`; it carried over from the repository this
   started in and there is no reason to churn it.
 - `viking-rise-entrypoint.sh` (repo root) - container entrypoint: machine-id
-  regeneration, Xvfb, x11vnc, then Steam.
+  initialization, Xvfb, x11vnc, then Steam.
 - `deploy/viking-rise-podman.sh` - build + run script.
 - `deploy/viking-rise.env.example` - documents the overridable variables.
   Copy to `deploy/viking-rise.env` for local overrides (gitignored). None of
@@ -113,13 +113,20 @@ Verified against the Ubuntu 22.04 `steam` source package
 
 ## Machine-id
 
-The entrypoint removes and regenerates `/etc/machine-id` (and the
-`/var/lib/dbus/machine-id` symlink) on every container start via
-`dbus-uuidgen --ensure=/etc/machine-id`. This container has no systemd as
-PID 1, so `systemd-machine-id-setup` isn't used; `dbus-uuidgen` is the
-documented way to (re)initialize `/etc/machine-id` without a running
-systemd instance, and the `dbus` package is installed specifically to
-provide it.
+The image does not contain a pre-generated `/etc/machine-id`. On the first
+start of a container, the entrypoint initializes it via
+`dbus-uuidgen --ensure=/etc/machine-id` and links
+`/var/lib/dbus/machine-id` to it. Subsequent restarts of that same
+container keep the ID stable. Removing and recreating the container creates
+a new ID, which is appropriate for this PoC because that is a new container
+instance.
+
+If machine identity ever needs to survive container recreation, persist
+`/etc/machine-id` separately. It is intentionally not stored in the Steam
+home volume because machine identity and application data have different
+lifecycles. This container has no systemd as PID 1, so
+`systemd-machine-id-setup` isn't used; the `dbus` package provides
+`dbus-uuidgen`.
 
 ## Steam login - manual only
 
@@ -178,8 +185,9 @@ pass.
 
 ## Privilege drop
 
-The container starts as root only long enough to regenerate
-`/etc/machine-id`, fix volume ownership, and start `Xvfb` and `x11vnc`. It
+The container starts as root only long enough to initialize
+`/etc/machine-id` when needed, fix volume ownership, and start `Xvfb` and
+`x11vnc`. It
 then `exec`s Steam through `runuser` as the unprivileged user, because
 Steam refuses to run as root.
 

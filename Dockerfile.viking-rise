@@ -56,6 +56,7 @@ RUN apt-get update \
         procps \
         fontconfig \
         fonts-liberation \
+    && rm -f /etc/machine-id /var/lib/dbus/machine-id \
     && rm -rf /var/lib/apt/lists/*
 
 # Steam refuses to run as root. steamuser's home (~/.steam,

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Entrypoint for the Viking Rise Steam-client container (MVP proof of concept).
 #
-# On every start: regenerates /etc/machine-id (containers cloned from the
+# On first start: initializes /etc/machine-id (containers cloned from the
 # same image must not share one - see machine-id(5) / systemd-machine-id-setup(1)),
 # starts a virtual X display (Xvfb), exposes it over x11vnc, then launches
 # Steam under an unprivileged user so the operator can log in by hand.
@@ -59,11 +59,14 @@ elif ! runuser -u "$STEAM_USER" -- test -r "$RENDER_DEVICE" -a -w "$RENDER_DEVIC
 fi
 
 # Machine-id must be unique per container instance, not baked into the
-# image and reused by every container started from it.
-rm -f /etc/machine-id /var/lib/dbus/machine-id
+# image and reused by every container started from it. Keep it stable when
+# the same container is restarted; a recreated container gets a new ID.
 mkdir -p /var/lib/dbus
-dbus-uuidgen --ensure=/etc/machine-id
-ln -sf /etc/machine-id /var/lib/dbus/machine-id
+if [[ ! -s /etc/machine-id ]]; then
+  rm -f /etc/machine-id
+  dbus-uuidgen --ensure=/etc/machine-id
+fi
+ln -sfn /etc/machine-id /var/lib/dbus/machine-id
 
 # Give the unprivileged user ownership of its persisted home volume. Only
 # pay for the recursive chown once - a volume that already belongs to
