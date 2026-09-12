@@ -24,6 +24,15 @@ IMAGE="${VIKING_RISE_IMAGE:-yolostaff-viking-rise:latest}"
 BIND_ADDRESS="${VIKING_RISE_VNC_BIND:-127.0.0.1}"
 VNC_PORT="${VIKING_RISE_VNC_PORT:-15900}"
 DATA_VOLUME="${VIKING_RISE_DATA_VOLUME:-viking-rise-steam-data}"
+# The entrypoint lets VIKING_RISE_STEAM_USER choose the account Steam runs
+# as, and Steam's session state lives in that account's home. Derive the
+# mount point from the same value so the volume can never land on a path
+# nobody writes to, silently losing the login on every restart.
+#
+# Overriding the user only works if the image actually contains it; the
+# stock Dockerfile.viking-rise creates 'steamuser' and nothing else.
+STEAM_USER="${VIKING_RISE_STEAM_USER:-steamuser}"
+STEAM_HOME="${VIKING_RISE_STEAM_HOME:-/home/${STEAM_USER}}"
 RENDER_DEVICE="${VIKING_RISE_RENDER_DEVICE:-/dev/dri/renderD128}"
 SCREEN_RES="${VIKING_RISE_SCREEN:-1280x800x24}"
 
@@ -57,13 +66,15 @@ podman run -d \
   --network "$NETWORK" \
   --device "${RENDER_DEVICE}:${RENDER_DEVICE}" \
   --publish "${BIND_ADDRESS}:${VNC_PORT}:5900" \
-  --volume "${DATA_VOLUME}:/home/steamuser:Z" \
+  --volume "${DATA_VOLUME}:${STEAM_HOME}:Z" \
   --env "VIKING_RISE_SCREEN=${SCREEN_RES}" \
   --env "VIKING_RISE_RENDER_DEVICE=${RENDER_DEVICE}" \
+  --env "VIKING_RISE_STEAM_USER=${STEAM_USER}" \
   --restart unless-stopped \
   "$IMAGE"
 
 echo
 echo "Started '$CONTAINER'."
 echo "Connect a VNC client to ${BIND_ADDRESS}:${VNC_PORT} and log into Steam manually."
+echo "Session data persists in volume '${DATA_VOLUME}' mounted at ${STEAM_HOME}."
 echo "Logs: podman logs -f $CONTAINER"
