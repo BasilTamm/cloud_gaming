@@ -45,6 +45,13 @@ if [[ ! -c "$RENDER_DEVICE" ]]; then
   echo "Warning: $RENDER_DEVICE not present inside the container." >&2
   echo "Rendering will fall back to software (llvmpipe) and be very slow." >&2
   echo "Check that the container was started with --device $RENDER_DEVICE:$RENDER_DEVICE." >&2
+elif ! runuser -u "$STEAM_USER" -- test -r "$RENDER_DEVICE" -a -w "$RENDER_DEVICE"; then
+  # Root can reach the device even when the unprivileged user cannot, and
+  # Steam runs as that user - so check access from its point of view.
+  # Otherwise the only symptom is an unexplained llvmpipe-slow game.
+  echo "Warning: $RENDER_DEVICE is not readable/writable by '$STEAM_USER'." >&2
+  echo "Steam drops to this user, so rendering will fall back to software (llvmpipe)." >&2
+  echo "On the host the render node is expected to be world-readable/writable (crw-rw-rw-)." >&2
 fi
 
 # Machine-id must be unique per container instance, not baked into the
