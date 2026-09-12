@@ -17,9 +17,19 @@ DISPLAY_NUM="${VIKING_RISE_DISPLAY:-:1}"
 SCREEN_RES="${VIKING_RISE_SCREEN:-1280x800x24}"
 VNC_PORT="${VIKING_RISE_VNC_INTERNAL_PORT:-5900}"
 RENDER_DEVICE="${VIKING_RISE_RENDER_DEVICE:-/dev/dri/renderD128}"
+# Debian/Ubuntu ship the Steam launcher in /usr/games (see the steam
+# package's debian/steam.install), which is NOT on the default container
+# PATH. It must be invoked by absolute path.
+STEAM_BIN="${VIKING_RISE_STEAM_BIN:-/usr/games/steam}"
 
 if [[ -z "$STEAM_HOME" ]]; then
   echo "Cannot resolve home directory for user '$STEAM_USER'." >&2
+  exit 1
+fi
+
+if [[ ! -x "$STEAM_BIN" ]]; then
+  echo "Steam launcher not found or not executable: $STEAM_BIN" >&2
+  echo "The image is expected to install it via the 'steam-installer' package." >&2
   exit 1
 fi
 
@@ -61,4 +71,12 @@ x11vnc -display "$DISPLAY_NUM" -forever -shared -rfbport "$VNC_PORT" -nopw -quie
 
 # Steam refuses to run as root anyway; runuser also keeps GPU-device access
 # scoped to the unprivileged app user instead of root.
-exec runuser -u "$STEAM_USER" -- env DISPLAY="$DISPLAY_NUM" HOME="$STEAM_HOME" steam
+#
+# runuser (without -l) hands the caller's environment to the target user, so
+# PATH is set explicitly here: /usr/games holds the Steam launcher and is
+# absent from the default container PATH.
+exec runuser -u "$STEAM_USER" -- env \
+  DISPLAY="$DISPLAY_NUM" \
+  HOME="$STEAM_HOME" \
+  PATH="/usr/games:/usr/local/bin:/usr/bin:/bin" \
+  "$STEAM_BIN"
