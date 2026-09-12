@@ -1,0 +1,4 @@
+# Local overrides for deploy/viking-rise-podman.sh. Only the .example is
+# tracked. No Steam credentials belong in this file - or anywhere in this
+# repository - but it is machine-local config and stays untracked.
+deploy/viking-rise.env
