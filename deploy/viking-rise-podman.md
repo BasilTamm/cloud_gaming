@@ -45,8 +45,11 @@ documentation for this use case.
 
 ## GPU / rendering
 
-- Uses `/dev/dri/renderD128` only (confirmed world-readable/writable on
-  `steamdeck`: `crw-rw-rw-`). `/dev/dri/card0` is intentionally not touched
+- Uses `/dev/dri/renderD128` only, and expects it to be world-readable/
+  writable (`crw-rw-rw-`) on `steamdeck`. This was **not** re-verified while
+  preparing this change - the environment it was written in has no `/dev/dri`
+  at all - so the deploy script checks for the node and its permissions at
+  runtime rather than assuming them. `/dev/dri/card0` is intentionally not touched
   - it's root/video-restricted and not needed for render-only access.
   `mesa-vulkan-drivers`, `mesa-va-drivers`, and `libgl1-mesa-dri` (amd64 +
   i386, since the Steam client itself is a 32-bit binary) are installed to
@@ -63,6 +66,27 @@ documentation for this use case.
   instead of silently pretending it's solved. Confirm actual in-game
   performance after a real deploy, and treat this as a likely next
   iteration.
+
+## Steam packaging notes
+
+Verified against the Ubuntu 22.04 `steam` source package
+(`steam_1.0.0.74-1ubuntu2`):
+
+- `steam-installer` is an architecture-independent shim that depends on the
+  real `steam` package, which jammy ships **for i386 only**. That is why the
+  image enables the i386 architecture before installing.
+- The launcher is installed as **`/usr/games/steam`**
+  (`debian/steam.install`). `/usr/games` is not on the default container
+  `PATH`, so the entrypoint calls it by absolute path.
+- The debconf preseed uses real templates: `steam/question` is a `select`
+  whose choices are `I DECLINE, I AGREE`, and `steam/license` is a `note`
+  (`debian/scripts/templates-helper`). No maintainer script in this version
+  prompts via `db_input`, so the preseed is defensive rather than strictly
+  required - it is kept so the build cannot become interactive.
+- `--no-install-recommends` is used, so `steam`'s Recommends are dropped
+  except the ones added back explicitly (Mesa drivers, `fontconfig`,
+  `fonts-liberation`). If a real run shows a broken Steam UI, `libegl1`,
+  `libgbm1`, `zenity`, `xdg-utils`, and `libxss1` are the first things to add.
 
 ## Machine-id
 
@@ -133,8 +157,33 @@ survives `podman rm`/recreate and host reboots.
 
 ## What has and hasn't been verified
 
-This was prepared without access to a real Podman/GPU/display environment.
-See the PR description and session report for the exact list of what was
-checked (shellcheck/Containerfile syntax) versus what was not run
-physically (image build, container start, `/dev/dri` access, VNC connect,
-Steam/game behavior). Test on `steamdeck` before relying on this.
+This was prepared in an environment with **no `podman`, no `docker`, no
+`shellcheck`, and no `/dev/dri`**. Be precise about what that means.
+
+Actually verified:
+
+- `bash -n` (syntax-only parse) passes for `viking-rise-entrypoint.sh` and
+  `deploy/viking-rise-podman.sh`.
+- The Steam packaging facts in "Steam packaging notes" above, read directly
+  from the Ubuntu `steam` source package and the jammy package file lists:
+  the `/usr/games/steam` path, the i386-only `steam` package, the
+  `steam-installer` dependency shim, and the debconf template names/types.
+- `dbus-uuidgen` is shipped by the `dbus` package on jammy
+  (`/usr/bin/dbus-uuidgen`).
+- No Steam credentials, tokens, or 2FA material appear anywhere in these
+  files.
+
+Not verified - never executed, by anyone, yet:
+
+- The image has never been built. `podman build` has not run once.
+- The container has never been started; no `podman run`, no logs.
+- `/dev/dri/renderD128` passthrough, and whether Mesa inside the container
+  matches the host `amdgpu` kernel module.
+- Any VNC connection to port `15900`, and whether the Steam window actually
+  appears on the Xvfb display.
+- Steam itself: first-run bootstrap, the login screen, login, and whether
+  Viking Rise launches or is playable at any framerate.
+- Whether `apt-get` resolves every listed package on a real jammy image
+  (package *existence* was checked; a full dependency solve was not).
+
+Test on `steamdeck` before relying on this.
