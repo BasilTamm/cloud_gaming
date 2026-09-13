@@ -36,3 +36,11 @@ Read **[`deploy/viking-rise-podman.md`](deploy/viking-rise-podman.md)** before
 running it — it documents the design decisions, the Steam packaging facts
 that were verified from the Ubuntu source package, and an explicit list of
 what has and has not been checked.
+
+## Steam Headless alternative
+
+[`deploy/steam-headless/`](deploy/steam-headless/) contains a separate,
+two-instance Compose spike based on the maintained third-party Steam Headless
+image. It provides browser access and audio without extending the original
+Ubuntu/Xvfb image. Its verdict is **PARTIAL** until framebuffer-mode
+Vulkan/Proton is tested on a real Steam Deck.

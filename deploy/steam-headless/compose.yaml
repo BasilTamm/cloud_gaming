@@ -1,0 +1,89 @@
+name: viking-rise-steam-headless
+
+x-steam-headless-common: &steam-headless-common
+  image: josh5/steam-headless@sha256:0d43c66ad0cf54cb0e51208b30f1f297d78264807661a581691224caa4dec0c0
+  restart: unless-stopped
+  shm_size: ${SHM_SIZE:-1g}
+  stop_grace_period: 30s
+  ulimits:
+    nofile:
+      soft: 1024
+      hard: 524288
+  devices:
+    - ${RENDER_DEVICE:-/dev/dri/renderD128}:${RENDER_DEVICE:-/dev/dri/renderD128}
+  # Podman-specific: preserve supplementary host groups for render-node access.
+  group_add:
+    - keep-groups
+  environment: &steam-headless-environment
+    TZ: ${TZ:-Etc/UTC}
+    USER_LOCALES: en_US.UTF-8 UTF-8
+    DISPLAY: :55
+    PUID: ${PUID:-1000}
+    PGID: ${PGID:-1000}
+    UMASK: "022"
+    # This protects container accounts, not noVNC. Loopback is the UI control.
+    MODE: framebuffer
+    WEB_UI_MODE: vnc
+    ENABLE_VNC_AUDIO: "true"
+    PORT_NOVNC_WEB: "8083"
+    ENABLE_STEAM: "true"
+    STEAM_ARGS: -silent
+    ENABLE_SUNSHINE: "false"
+    ENABLE_EVDEV_INPUTS: "false"
+    FORCE_X11_DUMMY_CONFIG: "false"
+    NVIDIA_VISIBLE_DEVICES: ""
+    NVIDIA_DRIVER_CAPABILITIES: ""
+  pids_limit: ${PIDS_LIMIT:-2048}
+
+services:
+  steam-1:
+    <<: *steam-headless-common
+    container_name: viking-rise-steam-1
+    hostname: viking-rise-steam-1
+    cpus: ${STEAM_1_CPUS:-3.0}
+    mem_limit: ${STEAM_1_MEM_LIMIT:-5g}
+    environment:
+      <<: *steam-headless-environment
+      USER_PASSWORD: ${INSTANCE_1_OS_PASSWORD:?set INSTANCE_1_OS_PASSWORD in .env}
+    ports:
+      - 127.0.0.1:${STEAM_1_WEB_PORT:-15901}:8083
+    volumes:
+      - steam-1-home:/home/default
+      - steam-1-games:/mnt/games
+    networks:
+      - steam-1-net
+
+  steam-2:
+    <<: *steam-headless-common
+    container_name: viking-rise-steam-2
+    hostname: viking-rise-steam-2
+    cpus: ${STEAM_2_CPUS:-3.0}
+    mem_limit: ${STEAM_2_MEM_LIMIT:-5g}
+    environment:
+      <<: *steam-headless-environment
+      USER_PASSWORD: ${INSTANCE_2_OS_PASSWORD:?set INSTANCE_2_OS_PASSWORD in .env}
+    ports:
+      - 127.0.0.1:${STEAM_2_WEB_PORT:-15902}:8083
+    volumes:
+      - steam-2-home:/home/default
+      - steam-2-games:/mnt/games
+    networks:
+      - steam-2-net
+
+volumes:
+  steam-1-home:
+    name: viking-rise-steam-1-home
+  steam-1-games:
+    name: viking-rise-steam-1-games
+  steam-2-home:
+    name: viking-rise-steam-2-home
+  steam-2-games:
+    name: viking-rise-steam-2-games
+
+networks:
+  steam-1-net:
+    name: viking-rise-steam-1-net
+    driver: bridge
+  steam-2-net:
+    name: viking-rise-steam-2-net
+    driver: bridge

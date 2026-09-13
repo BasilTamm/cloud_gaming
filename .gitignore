@@ -7,3 +7,6 @@ deploy/viking-rise.env
 # password only - never a Steam credential - but still a secret, and it
 # must never be committed.
 deploy/viking-rise-vnc.passwd
+
+# Local Steam Headless Compose settings, including container OS passwords.
+deploy/steam-headless/.env
