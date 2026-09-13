@@ -12,6 +12,8 @@ connects over VNC and **logs into Steam by hand**.
 
 ```bash
 cp deploy/viking-rise.env.example deploy/viking-rise.env   # optional
+x11vnc -storepasswd '<VNC password>' deploy/viking-rise-vnc.passwd
+chmod 600 deploy/viking-rise-vnc.passwd
 deploy/viking-rise-podman.sh
 ```
 

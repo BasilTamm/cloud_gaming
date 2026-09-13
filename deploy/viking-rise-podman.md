@@ -142,25 +142,27 @@ must not change. After the container starts:
 3. Log into Steam by hand (including any 2FA prompt) directly in that VNC
    session.
 
-By default VNC has no password (`x11vnc -nopw`) and relies entirely on the
-`127.0.0.1`-only publish plus this container's own network. See
-[VNC authentication](#vnc-authentication) to add a password, and do not
-change the bind address to `0.0.0.0`/a LAN address without doing so first.
+VNC password authentication is required by default. See
+[VNC authentication](#vnc-authentication). An explicit unauthenticated
+mode exists only for loopback-only local testing; the deploy script refuses
+to combine it with a non-loopback bind.
 
 ## Build and run
 
 ```bash
 cd /path/to/viking-rise-podman   # repository root
 cp deploy/viking-rise.env.example deploy/viking-rise.env   # optional, to override defaults
+x11vnc -storepasswd '<VNC password>' deploy/viking-rise-vnc.passwd
+chmod 600 deploy/viking-rise-vnc.passwd
 deploy/viking-rise-podman.sh
 ```
 
 The script:
 
 - Checks that `/dev/dri/renderD128` exists and is readable/writable.
-- Creates the `viking-rise-net` Podman network if missing. This container
-  gets a network of its own and must not share one (see
-  [Network isolation](#network-isolation)).
+- Creates the `viking-rise-net` Podman bridge network if missing. If it
+  already exists, the script refuses non-bridge networks and any foreign
+  attached container (see [Network isolation](#network-isolation)).
 - Creates the `viking-rise-steam-data` named volume if missing.
 - Builds `Dockerfile.viking-rise`.
 - Runs the container, publishing VNC to `127.0.0.1:15900` (host) ->
@@ -175,13 +177,12 @@ mounted from the `viking-rise-steam-data` named volume. As long as that
 volume isn't deleted (`podman volume rm`), a logged-in Steam session
 survives `podman rm`/recreate and host reboots.
 
-The mount point is derived from `VIKING_RISE_STEAM_USER` rather than
-hardcoded, so the volume always lands on the home directory of the account
-Steam actually runs as. Overriding that variable only works if the image
-contains the user - the stock `Dockerfile.viking-rise` creates `steamuser`
-and nothing else. On first start the entrypoint chowns the volume to that
-user once; later starts detect correct ownership and skip the recursive
-pass.
+The image, deploy script, and entrypoint deliberately fix the account and
+home to `steamuser` and `/home/steamuser`. They are not configurable in
+this MVP, which prevents the volume mount point from diverging from the
+HOME Steam actually uses. On first start the entrypoint chowns the volume
+to that user once; later starts detect correct ownership and skip the
+recursive pass.
 
 ## Privilege drop
 
@@ -210,18 +211,23 @@ user and warns explicitly instead of leaving it unexplained.
 
 ## VNC authentication
 
-Optional, and off by default. Create a password file on the host:
+Required by default. Create a password file on the host:
 
 ```bash
 x11vnc -storepasswd '<password>' deploy/viking-rise-vnc.passwd
 chmod 600 deploy/viking-rise-vnc.passwd
 ```
 
-The deploy script picks it up automatically, mounts it read-only, and
-`x11vnc` then runs with `-rfbauth` instead of `-nopw`. The file is
-gitignored and the script refuses to start unless it is mode `600`. If the
-file is configured but unreadable inside the container the entrypoint exits
-rather than quietly falling back to an open session.
+The deploy script mounts it read-only and `x11vnc` runs with `-rfbauth`.
+With `VIKING_RISE_VNC_AUTH=password` (the default), a missing, non-regular,
+unreadable, or incorrectly permissioned file is fatal. The entrypoint also
+fails closed if the expected bind mount is unavailable inside the
+container.
+
+For deliberate loopback-only local testing, set
+`VIKING_RISE_VNC_AUTH=none`. The deploy script rejects that mode unless
+`VIKING_RISE_VNC_BIND=127.0.0.1`; selecting a non-loopback bind requires
+password mode. VNC authentication does not encrypt the transport.
 
 This is a **VNC password only**. No Steam credential belongs in it, or
 anywhere else in this project - the Steam login stays manual.
@@ -232,24 +238,26 @@ an unencrypted transport; anyone who can see the traffic can see the
 session. The loopback publish and the dedicated network remain the real
 controls.
 
-Without a password file, any local process on the host can reach
-`127.0.0.1:15900` and take over a logged-in Steam session. On a
-single-user machine that is usually acceptable for an MVP; decide
-deliberately rather than by default.
+In explicit `none` mode, any local process on the host can reach
+`127.0.0.1:15900` and take over a logged-in Steam session.
 
 ## Network isolation
 
-**Rule: this container gets a Podman network of its own and never shares
-one.** `viking-rise-net` exists for that and holds nothing else.
+**Rule: this container gets a Podman bridge network of its own and never
+shares one.** `viking-rise-net` exists for that and holds nothing else.
+Before starting, the deploy script inspects an existing network and refuses
+it if its driver is not `bridge` or if any container other than the named
+Viking Rise container is attached. A newly created network is labelled
+`io.viking-rise.network=dedicated` for identification; the attachment check,
+not the label, enforces the rule.
 
-Why: `x11vnc` runs with `-nopw` and listens on `0.0.0.0:5900` inside the
-container. The `--publish 127.0.0.1:15900:5900` bind restricts access
-arriving through the *host* only - it does nothing about traffic between
-containers on the same bridge. Anything co-attached can dial the container
-IP on port `5900` and get an unauthenticated, fully interactive session:
-silent keyboard and mouse control of a logged-in Steam client, and a view
-of the password and 2FA code as they are typed by hand over that same
-channel.
+Why: `x11vnc` listens on `0.0.0.0:5900` inside the container. The
+`--publish 127.0.0.1:15900:5900` bind restricts access arriving through the
+*host* only - it does nothing about traffic between containers on the same
+bridge. In explicit `none` mode, anything co-attached could get an
+unauthenticated interactive session. In password mode, VNC remains an
+unencrypted legacy protocol and should not be exposed to unrelated
+co-tenants.
 
 So the bar for a co-tenant is not "is this service trusted today" but "is
 it acceptable for this service, at any future point, to own the Steam
@@ -258,11 +266,11 @@ outbound internet, so an unshared network costs nothing.
 
 Consequences to keep in mind:
 
-- The loopback publish and this network separation are currently the
-  *entire* access control. Anything that widens either one - binding to
-  `0.0.0.0`, joining another network, exposing the port through a tunnel -
-  needs real VNC authentication (`-rfbauth`, or `-localhost` plus an SSH
-  tunnel) added first.
+- Password authentication, the loopback publish, and network separation are
+  independent layers. Explicit `none` mode retains only the latter two.
+- A non-loopback bind is accepted only in password mode, but `-rfbauth`
+  does not encrypt the transport; use a trusted network or an encrypted
+  tunnel.
 - Even with authentication, VNC's built-in scheme is DES-based and silently
   truncates passwords to 8 characters, over an unencrypted transport. Treat
   it as a second layer, never as the primary one.

@@ -11,14 +11,14 @@
 # into Steam manually through the VNC session after the container starts.
 set -euo pipefail
 
-STEAM_USER="${VIKING_RISE_STEAM_USER:-steamuser}"
+STEAM_USER="steamuser"
+STEAM_HOME="/home/steamuser"
 DISPLAY_NUM="${VIKING_RISE_DISPLAY:-:1}"
 SCREEN_RES="${VIKING_RISE_SCREEN:-1280x800x24}"
 VNC_PORT="${VIKING_RISE_VNC_INTERNAL_PORT:-5900}"
 RENDER_DEVICE="${VIKING_RISE_RENDER_DEVICE:-/dev/dri/renderD128}"
-# Path *inside the container* to an x11vnc password file. Empty means no
-# VNC authentication; see the VNC authentication section in
-# deploy/viking-rise-podman.md.
+# Path *inside the container* to an x11vnc password file.
+VNC_AUTH="${VIKING_RISE_VNC_AUTH:-password}"
 VNC_PASSWD_FILE="${VIKING_RISE_VNC_PASSWD_FILE:-}"
 # Debian/Ubuntu ship the Steam launcher in /usr/games (see the steam
 # package's debian/steam.install), which is NOT on the default container
@@ -32,10 +32,9 @@ if ! passwd_entry="$(getent passwd "$STEAM_USER")"; then
   echo "No such user inside the container: '$STEAM_USER'." >&2
   exit 1
 fi
-STEAM_HOME="$(cut -d: -f6 <<<"$passwd_entry")"
-
-if [[ -z "$STEAM_HOME" ]]; then
-  echo "Cannot resolve home directory for user '$STEAM_USER'." >&2
+passwd_home="$(cut -d: -f6 <<<"$passwd_entry")"
+if [[ "$passwd_home" != "$STEAM_HOME" ]]; then
+  echo "Unexpected home for '$STEAM_USER': '$passwd_home' (expected '$STEAM_HOME')." >&2
   exit 1
 fi
 
@@ -89,25 +88,32 @@ if [[ ! -e "$X_SOCKET" ]]; then
   exit 1
 fi
 
-# Authentication is opt-in: a mounted password file enables -rfbauth, and
-# its absence is announced loudly rather than passing silently. A file that
-# was configured but cannot be read is fatal - falling back to an open
-# session because a mount went wrong is exactly the wrong failure mode.
-if [[ -n "$VNC_PASSWD_FILE" ]]; then
-  if [[ ! -r "$VNC_PASSWD_FILE" ]]; then
+# Authentication mode is explicit. Password mode fails closed if the bind
+# mount is absent or unreadable; unauthenticated mode must be requested by
+# the deploy script and is restricted to a host-loopback publish there.
+case "$VNC_AUTH" in
+password)
+  if [[ ! -f "$VNC_PASSWD_FILE" || ! -r "$VNC_PASSWD_FILE" ]]; then
     echo "VNC password file configured but not readable: $VNC_PASSWD_FILE" >&2
     echo "Refusing to start an unauthenticated VNC session instead." >&2
     kill "$XVFB_PID" 2>/dev/null || true
     exit 1
   fi
   vnc_auth=(-rfbauth "$VNC_PASSWD_FILE")
-else
+  ;;
+none)
   echo "Warning: VNC has no password (-nopw)." >&2
   echo "Access control is the loopback publish plus this container's own network." >&2
   echo "Any local process on the host can take over the Steam session." >&2
   echo "See 'VNC authentication' in deploy/viking-rise-podman.md." >&2
   vnc_auth=(-nopw)
-fi
+  ;;
+*)
+  echo "Invalid VIKING_RISE_VNC_AUTH: $VNC_AUTH (expected password or none)." >&2
+  kill "$XVFB_PID" 2>/dev/null || true
+  exit 1
+  ;;
+esac
 
 x11vnc -display "$DISPLAY_NUM" -forever -shared -rfbport "$VNC_PORT" \
   "${vnc_auth[@]}" -quiet &
