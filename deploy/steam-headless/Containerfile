@@ -1,0 +1,23 @@
+FROM josh5/steam-headless@sha256:0d43c66ad0cf54cb0e51208b30f1f297d78264807661a581691224caa4dec0c0
+
+USER root
+
+# The pinned upstream image enables framebuffer mode through /usr/bin/Xvfb,
+# but its Debian image does not contain that binary. Add only the missing
+# package; do not import the privileges from upstream's host-oriented example.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends procps util-linux xvfb \
+    && rm -rf /var/lib/apt/lists/* \
+    && test -x /usr/bin/Xvfb \
+    && test -x /usr/bin/setpriv
+
+COPY overlay/usr/local/bin/start-desktop-preserve-groups.sh /usr/local/bin/start-desktop-preserve-groups.sh
+COPY overlay/usr/local/bin/start-desktop-unprivileged.sh /usr/local/bin/start-desktop-unprivileged.sh
+COPY overlay/usr/local/bin/start-x11vnc-auth.sh /usr/local/bin/start-x11vnc-auth.sh
+COPY overlay/etc/supervisor.d/desktop.ini /etc/supervisor.d/desktop.ini
+COPY overlay/etc/supervisor.d/vnc.ini /etc/supervisor.d/vnc.ini
+
+RUN chmod 0755 \
+      /usr/local/bin/start-desktop-preserve-groups.sh \
+      /usr/local/bin/start-desktop-unprivileged.sh \
+      /usr/local/bin/start-x11vnc-auth.sh

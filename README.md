@@ -41,6 +41,7 @@ what has and has not been checked.
 
 [`deploy/steam-headless/`](deploy/steam-headless/) contains a separate,
 two-instance Compose spike based on the maintained third-party Steam Headless
-image. It provides browser access and audio without extending the original
-Ubuntu/Xvfb image. Its verdict is **PARTIAL** until framebuffer-mode
+image. A small pinned derivative adds the `Xvfb` binary missing from upstream's
+framebuffer path, preserves rootless render groups across the desktop privilege
+drop, and enables VNC authentication. Its verdict remains **PARTIAL** until
 Vulkan/Proton is tested on a real Steam Deck.
