@@ -40,7 +40,7 @@ what has and has not been checked.
 ## Steam Headless alternative
 
 [`deploy/steam-headless/`](deploy/steam-headless/) contains a separate,
-two-instance Compose spike based on the maintained third-party Steam Headless
+two-instance plain-Podman spike based on the maintained third-party Steam Headless
 image. A small pinned derivative adds the `Xvfb` binary missing from upstream's
 framebuffer path, preserves rootless render groups across the desktop privilege
 drop, and enables VNC authentication. Its verdict remains **PARTIAL** until

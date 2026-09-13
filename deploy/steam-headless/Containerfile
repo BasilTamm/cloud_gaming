@@ -14,10 +14,13 @@ RUN apt-get update \
 COPY overlay/usr/local/bin/start-desktop-preserve-groups.sh /usr/local/bin/start-desktop-preserve-groups.sh
 COPY overlay/usr/local/bin/start-desktop-unprivileged.sh /usr/local/bin/start-desktop-unprivileged.sh
 COPY overlay/usr/local/bin/start-x11vnc-auth.sh /usr/local/bin/start-x11vnc-auth.sh
+COPY overlay/usr/local/bin/healthcheck-steam-headless.sh /usr/local/bin/healthcheck-steam-headless.sh
 COPY overlay/etc/supervisor.d/desktop.ini /etc/supervisor.d/desktop.ini
 COPY overlay/etc/supervisor.d/vnc.ini /etc/supervisor.d/vnc.ini
 
 RUN chmod 0755 \
       /usr/local/bin/start-desktop-preserve-groups.sh \
       /usr/local/bin/start-desktop-unprivileged.sh \
-      /usr/local/bin/start-x11vnc-auth.sh
+      /usr/local/bin/start-x11vnc-auth.sh \
+      /usr/local/bin/healthcheck-steam-headless.sh \
+    && test -x /usr/bin/curl

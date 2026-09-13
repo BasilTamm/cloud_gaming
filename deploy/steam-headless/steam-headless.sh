@@ -13,6 +13,10 @@ if [[ "${1:-}" == "--env-file" ]]; then
 fi
 [[ $# -eq 0 ]] || { echo "ERROR: unexpected arguments: $*" >&2; exit 1; }
 
+readonly IMAGE="localhost/viking-rise-steam-headless:xvfb"
+readonly PROJECT_LABEL="io.openclaw.viking-rise.project"
+readonly PROJECT_VALUE="steam-headless"
+
 die() {
   echo "ERROR: $*" >&2
   exit 1
@@ -23,11 +27,11 @@ usage() {
 Usage: ./steam-headless.sh ACTION [--env-file PATH]
 
 Actions:
-  check     Validate the exact configuration without pulling or starting.
+  check     Validate the host and exact instance configuration.
   build     Build the pinned derivative image containing Xvfb.
-  up-one    Build/start only steam-1 and wait for container health.
-  up-two    Build/start steam-2 after steam-1 has been accepted physically.
-  down      Stop containers while preserving named volumes.
+  up-one    Recreate steam-1 and wait for container health.
+  up-two    Recreate steam-2 after steam-1 has been accepted physically.
+  down      Remove both managed containers and networks; preserve volumes.
 EOF
 }
 
@@ -39,6 +43,63 @@ esac
 
 [[ "$(uname -m)" == "x86_64" ]] || die "Steam Headless image is amd64-only; host is $(uname -m)."
 command -v podman >/dev/null 2>&1 || die "podman is not installed or not on PATH."
+
+for remote_var in CONTAINER_HOST CONTAINER_CONNECTION DOCKER_HOST; do
+  [[ -z "${!remote_var:-}" ]] || die "$remote_var must be unset; this spike targets local Podman."
+done
+
+rootless="$(podman info --format '{{.Host.Security.Rootless}}')"
+[[ "$rootless" == "true" ]] || die "Run with rootless Podman, not sudo/rootful Podman."
+service_is_remote="$(podman info --format '{{.Host.ServiceIsRemote}}')"
+[[ "$service_is_remote" == "false" ]] || die "A local Podman service is required; ServiceIsRemote=$service_is_remote."
+
+container_label() {
+  podman inspect --format "{{index .Config.Labels \"$PROJECT_LABEL\"}}" "$1" 2>/dev/null || true
+}
+
+network_label() {
+  podman network inspect --format "{{index .Labels \"$PROJECT_LABEL\"}}" "$1" 2>/dev/null || true
+}
+
+volume_label() {
+  podman volume inspect --format "{{index .Labels \"$PROJECT_LABEL\"}}" "$1" 2>/dev/null || true
+}
+
+remove_managed_container() {
+  local container="$1"
+  podman container exists "$container" || return 0
+  [[ "$(container_label "$container")" == "$PROJECT_VALUE" ]] || \
+    die "Refusing to remove unmanaged container named $container."
+  podman rm -f -t 30 "$container"
+}
+
+remove_managed_network() {
+  local network="$1"
+  podman network exists "$network" || return 0
+  [[ "$(network_label "$network")" == "$PROJECT_VALUE" ]] || \
+    die "Refusing to remove unmanaged network named $network."
+  podman network rm "$network"
+}
+
+if [[ "$ACTION" == "down" ]]; then
+  remove_managed_container viking-rise-steam-2
+  remove_managed_container viking-rise-steam-1
+  remove_managed_network viking-rise-steam-2-net
+  remove_managed_network viking-rise-steam-1-net
+  echo "Managed containers and networks removed; named volumes preserved."
+  exit 0
+fi
+
+if [[ "$ACTION" == "build" ]]; then
+  podman build --pull=missing -t "$IMAGE" -f "${SCRIPT_DIR}/Containerfile" "$SCRIPT_DIR"
+  exit 0
+fi
+
+oci_runtime="$(podman info --format '{{.Host.OCIRuntime.Name}}')"
+[[ "$oci_runtime" == "crun" ]] || die "--group-add keep-groups requires crun; selected runtime is $oci_runtime."
+cgroups_version="$(podman info --format '{{.Host.CgroupsVersion}}')"
+[[ "$cgroups_version" == "v2" ]] || die "Resource limits require cgroup v2; found $cgroups_version."
+
 [[ -f "$ENV_FILE" && ! -L "$ENV_FILE" ]] || die "$ENV_FILE must be a regular file, not a symlink."
 owner_uid="$(stat -c '%u' "$ENV_FILE")"
 permissions="$(stat -c '%a' "$ENV_FILE")"
@@ -58,8 +119,6 @@ declare -A values=(
 )
 declare -A seen=()
 
-# Parse a deliberately small KEY=VALUE format. Values are exported explicitly,
-# so inherited shell variables cannot override what is validated and launched.
 while IFS= read -r line || [[ -n "$line" ]]; do
   line="${line%$'\r'}"
   [[ -z "$line" || "$line" == \#* ]] && continue
@@ -72,71 +131,116 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   values[$key]="$value"
 done < "$ENV_FILE"
 
-for key in "${!values[@]}"; do
-  declare -gx "$key=${values[$key]}"
-done
+TZ_VALUE="${values[TZ]}"
+PUID_VALUE="${values[PUID]}"
+PGID_VALUE="${values[PGID]}"
+RENDER_DEVICE_VALUE="${values[RENDER_DEVICE]}"
+SHM_SIZE_VALUE="${values[SHM_SIZE]}"
+PIDS_LIMIT_VALUE="${values[PIDS_LIMIT]}"
+STEAM_1_WEB_PORT_VALUE="${values[STEAM_1_WEB_PORT]}"
+INSTANCE_1_OS_PASSWORD_VALUE="${values[INSTANCE_1_OS_PASSWORD]}"
+STEAM_1_CPUS_VALUE="${values[STEAM_1_CPUS]}"
+STEAM_1_MEM_LIMIT_VALUE="${values[STEAM_1_MEM_LIMIT]}"
+STEAM_2_WEB_PORT_VALUE="${values[STEAM_2_WEB_PORT]}"
+INSTANCE_2_OS_PASSWORD_VALUE="${values[INSTANCE_2_OS_PASSWORD]}"
+STEAM_2_CPUS_VALUE="${values[STEAM_2_CPUS]}"
+STEAM_2_MEM_LIMIT_VALUE="${values[STEAM_2_MEM_LIMIT]}"
 
-: "${INSTANCE_1_OS_PASSWORD:?set INSTANCE_1_OS_PASSWORD in $ENV_FILE}"
-: "${INSTANCE_2_OS_PASSWORD:?set INSTANCE_2_OS_PASSWORD in $ENV_FILE}"
-[[ "$INSTANCE_1_OS_PASSWORD" =~ ^[[:xdigit:]]{16,}$ ]] || \
-  die "INSTANCE_1_OS_PASSWORD must be at least 16 hexadecimal characters."
-[[ "$INSTANCE_2_OS_PASSWORD" =~ ^[[:xdigit:]]{16,}$ ]] || \
-  die "INSTANCE_2_OS_PASSWORD must be at least 16 hexadecimal characters."
-[[ "$INSTANCE_1_OS_PASSWORD" != "$INSTANCE_2_OS_PASSWORD" ]] || die "Use different local passwords."
-[[ "${INSTANCE_1_OS_PASSWORD:0:8}" != "${INSTANCE_2_OS_PASSWORD:0:8}" ]] || \
+[[ "$TZ_VALUE" =~ ^[A-Za-z0-9_+./-]+$ && "$TZ_VALUE" != *..* ]] || die "Invalid TZ: $TZ_VALUE"
+[[ "$PUID_VALUE" == "$(id -u)" ]] || die "PUID must equal invoking UID $(id -u)."
+[[ "$PGID_VALUE" == "$(id -g)" ]] || die "PGID must equal invoking primary GID $(id -g)."
+
+validate_password() {
+  local name="$1" password="$2"
+  [[ "$password" =~ ^[[:xdigit:]]{16,}$ ]] || die "$name must be at least 16 hexadecimal characters."
+}
+validate_password INSTANCE_1_OS_PASSWORD "$INSTANCE_1_OS_PASSWORD_VALUE"
+validate_password INSTANCE_2_OS_PASSWORD "$INSTANCE_2_OS_PASSWORD_VALUE"
+[[ "${INSTANCE_1_OS_PASSWORD_VALUE:0:8}" != "${INSTANCE_2_OS_PASSWORD_VALUE:0:8}" ]] || \
   die "The first eight password characters must differ because VNC truncates there."
 
-[[ "$PUID" == "$(id -u)" ]] || die "PUID must equal the invoking user ID: $(id -u)."
-[[ "$PGID" == "$(id -g)" ]] || die "PGID must equal the invoking primary group ID: $(id -g)."
+parse_size_mib() {
+  local value="$1" number unit
+  [[ "$value" =~ ^([0-9]+)([mMgG])$ ]] || die "Invalid size: $value (use an integer plus m or g)."
+  number="${BASH_REMATCH[1]}"
+  unit="${BASH_REMATCH[2],,}"
+  if [[ "$unit" == "g" ]]; then echo $((number * 1024)); else echo "$number"; fi
+}
 
-canonical_device="$(readlink -f -- "$RENDER_DEVICE")" || die "Cannot resolve $RENDER_DEVICE."
-[[ "$canonical_device" == "$RENDER_DEVICE" ]] || die "RENDER_DEVICE must be a canonical path, not a symlink."
-[[ "$RENDER_DEVICE" =~ ^/dev/dri/renderD[0-9]+$ ]] || \
-  die "RENDER_DEVICE must be /dev/dri/renderD<number>, not $RENDER_DEVICE."
-[[ -c "$RENDER_DEVICE" ]] || die "$RENDER_DEVICE is not a character device."
-device_hex="$(stat -c '%t:%T' "$RENDER_DEVICE")"
+validate_cpu() {
+  local name="$1" value="$2"
+  [[ "$value" =~ ^([0-9]+)(\.[0-9]+)?$ ]] || die "Invalid $name: $value"
+  awk -v value="$value" 'BEGIN { exit !(value >= 0.25 && value <= 8.0) }' || \
+    die "$name must be between 0.25 and 8.0."
+}
+
+validate_port() {
+  local name="$1" value="$2"
+  [[ "$value" =~ ^[0-9]+$ && "$value" -ge 1024 && "$value" -le 65535 ]] || die "Invalid $name: $value"
+}
+
+validate_port STEAM_1_WEB_PORT "$STEAM_1_WEB_PORT_VALUE"
+validate_port STEAM_2_WEB_PORT "$STEAM_2_WEB_PORT_VALUE"
+[[ "$STEAM_1_WEB_PORT_VALUE" != "$STEAM_2_WEB_PORT_VALUE" ]] || die "Browser ports must differ."
+validate_cpu STEAM_1_CPUS "$STEAM_1_CPUS_VALUE"
+validate_cpu STEAM_2_CPUS "$STEAM_2_CPUS_VALUE"
+[[ "$PIDS_LIMIT_VALUE" =~ ^[0-9]+$ && "$PIDS_LIMIT_VALUE" -ge 256 && "$PIDS_LIMIT_VALUE" -le 8192 ]] || \
+  die "PIDS_LIMIT must be between 256 and 8192."
+shm_mib="$(parse_size_mib "$SHM_SIZE_VALUE")"
+[[ "$shm_mib" -ge 64 && "$shm_mib" -le 4096 ]] || die "SHM_SIZE must be between 64m and 4g."
+for memory in "$STEAM_1_MEM_LIMIT_VALUE" "$STEAM_2_MEM_LIMIT_VALUE"; do
+  memory_mib="$(parse_size_mib "$memory")"
+  [[ "$memory_mib" -ge 1024 && "$memory_mib" -le 12288 ]] || die "Memory limits must be between 1g and 12g."
+  [[ "$shm_mib" -le "$memory_mib" ]] || die "SHM_SIZE cannot exceed a container memory limit."
+done
+
+canonical_device="$(readlink -f -- "$RENDER_DEVICE_VALUE")" || die "Cannot resolve $RENDER_DEVICE_VALUE."
+[[ "$canonical_device" == "$RENDER_DEVICE_VALUE" ]] || die "RENDER_DEVICE must be canonical, not a symlink."
+[[ "$RENDER_DEVICE_VALUE" =~ ^/dev/dri/renderD[0-9]+$ ]] || die "RENDER_DEVICE must be /dev/dri/renderD<number>."
+[[ -c "$RENDER_DEVICE_VALUE" ]] || die "$RENDER_DEVICE_VALUE is not a character device."
+device_hex="$(stat -c '%t:%T' "$RENDER_DEVICE_VALUE")"
 major_hex="${device_hex%%:*}"
 minor_hex="${device_hex##*:}"
-(( 16#$major_hex == 226 && 16#$minor_hex >= 128 )) || die "$RENDER_DEVICE is not a DRM render node."
-[[ -d "/sys/class/drm/$(basename -- "$RENDER_DEVICE")/device" ]] || die "$RENDER_DEVICE has no DRM sysfs device."
-[[ -r "$RENDER_DEVICE" && -w "$RENDER_DEVICE" ]] || die "Current user cannot read/write $RENDER_DEVICE."
-
-for remote_var in CONTAINER_HOST CONTAINER_CONNECTION DOCKER_HOST; do
-  [[ -z "${!remote_var:-}" ]] || die "$remote_var must be unset; this spike targets the local Podman service."
-done
-
-rootless="$(podman info --format '{{.Host.Security.Rootless}}')"
-[[ "$rootless" == "true" ]] || die "Run with rootless Podman, not sudo/rootful Podman."
-oci_runtime="$(podman info --format '{{.Host.OCIRuntime.Name}}')"
-[[ "$oci_runtime" == "crun" ]] || die "group_add: keep-groups requires crun; selected runtime is $oci_runtime."
-cgroups_version="$(podman info --format '{{.Host.CgroupsVersion}}')"
-[[ "$cgroups_version" == "v2" ]] || die "Resource-limit checks require cgroup v2; found $cgroups_version."
-
-compose_version="$(podman compose version 2>&1)" || die "No Compose provider is available through podman compose."
-
-for port_name in STEAM_1_WEB_PORT STEAM_2_WEB_PORT; do
-  port="${!port_name}"
-  [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1024 && "$port" -le 65535 ]] || die "Invalid $port_name: $port"
-done
-[[ "$STEAM_1_WEB_PORT" != "$STEAM_2_WEB_PORT" ]] || die "The browser ports must differ."
-
-compose() {
-  (cd "$SCRIPT_DIR" && env -u BASH_ENV -u ENV podman compose -f compose.yaml "$@")
-}
+(( 16#$major_hex == 226 && 16#$minor_hex >= 128 )) || die "$RENDER_DEVICE_VALUE is not a DRM render node."
+[[ -d "/sys/class/drm/$(basename -- "$RENDER_DEVICE_VALUE")/device" ]] || die "$RENDER_DEVICE_VALUE has no DRM sysfs device."
+[[ -r "$RENDER_DEVICE_VALUE" && -w "$RENDER_DEVICE_VALUE" ]] || die "Current user cannot read/write $RENDER_DEVICE_VALUE."
 
 check_port() {
   local port="$1" container="$2" published=""
   command -v ss >/dev/null 2>&1 || return 0
   ss -H -ltn "sport = :$port" | grep -q . || return 0
-
   published="$(podman port "$container" 8083/tcp 2>/dev/null || true)"
-  grep -Fxq "127.0.0.1:$port" <<<"$published" || \
-    die "TCP port $port is already listening and is not owned by $container."
+  grep -Fxq "127.0.0.1:$port" <<<"$published" || die "TCP port $port is already occupied."
 }
 
-resolved_config="$(mktemp)"
-trap 'rm -f -- "$resolved_config"' EXIT
-compose config >"$resolved_config" || die "The Compose provider cannot render compose.yaml."
+ensure_image() {
+  podman image exists "$IMAGE" || die "Image $IMAGE is missing; run ./steam-headless.sh build first."
+}
+
+ensure_network() {
+  local network="$1" expected_container="$2" driver attached
+  if ! podman network exists "$network"; then
+    podman network create --driver bridge --label "$PROJECT_LABEL=$PROJECT_VALUE" "$network" >/dev/null
+  fi
+  [[ "$(network_label "$network")" == "$PROJECT_VALUE" ]] || die "Network $network is not managed by this project."
+  driver="$(podman network inspect --format '{{.Driver}}' "$network")"
+  [[ "$driver" == "bridge" ]] || die "Network $network must use bridge, not $driver."
+  attached="$(podman network inspect --format '{{range .Containers}}{{println .Name}}{{end}}' "$network" 2>/dev/null || true)"
+  while IFS= read -r name; do
+    [[ -z "$name" || "$name" == "$expected_container" ]] || die "Network $network is shared with $name."
+  done <<<"$attached"
+}
+
+ensure_volume() {
+  local volume="$1" instance="$2" purpose="$3" expected actual
+  expected="$instance/$purpose"
+  if ! podman volume exists "$volume"; then
+    podman volume create --label "$PROJECT_LABEL=$PROJECT_VALUE" --label "io.openclaw.viking-rise.volume=$expected" "$volume" >/dev/null
+  fi
+  [[ "$(volume_label "$volume")" == "$PROJECT_VALUE" ]] || die "Volume $volume is not managed by this project."
+  actual="$(podman volume inspect --format '{{index .Labels "io.openclaw.viking-rise.volume"}}' "$volume")"
+  [[ "$actual" == "$expected" ]] || die "Volume $volume has unexpected purpose label: $actual."
+}
 
 wait_healthy() {
   local container="$1" status=""
@@ -151,27 +255,91 @@ wait_healthy() {
   die "$container did not become healthy (last status: ${status:-unknown})."
 }
 
-echo "Validated provider: $compose_version"
-echo "Validated rootless runtime: $oci_runtime, cgroup $cgroups_version"
+run_instance() {
+  local instance="$1" port="$2" password="$3" cpus="$4" memory="$5"
+  local container="viking-rise-steam-$instance"
+  local network="viking-rise-steam-$instance-net"
+  local home_volume="viking-rise-steam-$instance-home"
+  local games_volume="viking-rise-steam-$instance-games"
+  local runtime_env
+
+  ensure_image
+  check_port "$port" "$container"
+  ensure_network "$network" "$container"
+  ensure_volume "$home_volume" "steam-$instance" home
+  ensure_volume "$games_volume" "steam-$instance" games
+  remove_managed_container "$container"
+
+  runtime_env="$(mktemp)"
+  chmod 600 "$runtime_env"
+  printf 'USER_PASSWORD=%s\n' "$password" >"$runtime_env"
+  trap 'rm -f -- "$runtime_env"' EXIT
+
+  podman run -d \
+    --name "$container" \
+    --hostname "$container" \
+    --label "$PROJECT_LABEL=$PROJECT_VALUE" \
+    --label "io.openclaw.viking-rise.instance=steam-$instance" \
+    --network "$network" \
+    --device "$RENDER_DEVICE_VALUE:$RENDER_DEVICE_VALUE" \
+    --group-add keep-groups \
+    --publish "127.0.0.1:$port:8083" \
+    --volume "$home_volume:/home/default:Z" \
+    --volume "$games_volume:/mnt/games:Z" \
+    --env-file "$runtime_env" \
+    --env "TZ=$TZ_VALUE" \
+    --env 'USER_LOCALES=en_US.UTF-8 UTF-8' \
+    --env DISPLAY=:55 \
+    --env "PUID=$PUID_VALUE" \
+    --env "PGID=$PGID_VALUE" \
+    --env UMASK=022 \
+    --env MODE=framebuffer \
+    --env WEB_UI_MODE=vnc \
+    --env ENABLE_VNC_AUDIO=true \
+    --env PORT_NOVNC_WEB=8083 \
+    --env ENABLE_STEAM=true \
+    --env STEAM_ARGS=-silent \
+    --env ENABLE_SUNSHINE=false \
+    --env ENABLE_EVDEV_INPUTS=false \
+    --env FORCE_X11_DUMMY_CONFIG=false \
+    --env NVIDIA_VISIBLE_DEVICES= \
+    --env NVIDIA_DRIVER_CAPABILITIES= \
+    --env "RENDER_DEVICE=$RENDER_DEVICE_VALUE" \
+    --cpus "$cpus" \
+    --memory "$memory" \
+    --pids-limit "$PIDS_LIMIT_VALUE" \
+    --shm-size "$SHM_SIZE_VALUE" \
+    --ulimit nofile=1024:524288 \
+    --restart unless-stopped \
+    --stop-timeout 30 \
+    --health-cmd /usr/local/bin/healthcheck-steam-headless.sh \
+    --health-interval 10s \
+    --health-timeout 3s \
+    --health-retries 12 \
+    --health-start-period 45s \
+    "$IMAGE" >/dev/null
+
+  rm -f -- "$runtime_env"
+  trap - EXIT
+  wait_healthy "$container"
+  echo "Open http://127.0.0.1:$port/"
+}
+
+echo "Validated local rootless Podman: runtime=$oci_runtime, cgroup=$cgroups_version"
 
 case "$ACTION" in
   check)
-    check_port "$STEAM_1_WEB_PORT" viking-rise-steam-1
-    check_port "$STEAM_2_WEB_PORT" viking-rise-steam-2
+    check_port "$STEAM_1_WEB_PORT_VALUE" viking-rise-steam-1
+    check_port "$STEAM_2_WEB_PORT_VALUE" viking-rise-steam-2
     echo "Preflight passed; no image was pulled, built, or started."
     ;;
-  build) compose build ;;
   up-one)
-    check_port "$STEAM_1_WEB_PORT" viking-rise-steam-1
-    compose up -d --build steam-1
-    wait_healthy viking-rise-steam-1
+    run_instance 1 "$STEAM_1_WEB_PORT_VALUE" "$INSTANCE_1_OS_PASSWORD_VALUE" "$STEAM_1_CPUS_VALUE" "$STEAM_1_MEM_LIMIT_VALUE"
     ;;
   up-two)
+    [[ "$(container_label viking-rise-steam-1)" == "$PROJECT_VALUE" ]] || die "steam-1 is not managed by this project."
     [[ "$(podman inspect --format '{{.State.Health.Status}}' viking-rise-steam-1 2>/dev/null || true)" == "healthy" ]] || \
       die "steam-1 must be running and healthy before starting steam-2."
-    check_port "$STEAM_2_WEB_PORT" viking-rise-steam-2
-    compose up -d --build steam-2
-    wait_healthy viking-rise-steam-2
+    run_instance 2 "$STEAM_2_WEB_PORT_VALUE" "$INSTANCE_2_OS_PASSWORD_VALUE" "$STEAM_2_CPUS_VALUE" "$STEAM_2_MEM_LIMIT_VALUE"
     ;;
-  down) compose down ;;
 esac
