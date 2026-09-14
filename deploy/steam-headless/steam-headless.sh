@@ -107,13 +107,15 @@ permissions="$(stat -c '%a' "$ENV_FILE")"
 [[ "$permissions" == "600" ]] || die "$ENV_FILE must have mode 600, not $permissions."
 
 declare -A allowed=(
-  [TZ]=1 [PUID]=1 [PGID]=1 [RENDER_DEVICE]=1 [DNS_SERVER]=1 [SHM_SIZE]=1 [PIDS_LIMIT]=1
+  [TZ]=1 [PUID]=1 [PGID]=1 [RENDER_DEVICE]=1 [DNS_SERVER]=1 [DISPLAY_WIDTH]=1 [DISPLAY_HEIGHT]=1
+  [SHM_SIZE]=1 [PIDS_LIMIT]=1
   [STEAM_1_WEB_PORT]=1 [INSTANCE_1_OS_PASSWORD]=1 [STEAM_1_CPUS]=1 [STEAM_1_MEM_LIMIT]=1
   [STEAM_2_WEB_PORT]=1 [INSTANCE_2_OS_PASSWORD]=1 [STEAM_2_CPUS]=1 [STEAM_2_MEM_LIMIT]=1
 )
 declare -A values=(
   [TZ]="Etc/UTC" [PUID]="$(id -u)" [PGID]="$(id -g)"
-  [RENDER_DEVICE]="/dev/dri/renderD128" [DNS_SERVER]="1.1.1.1" [SHM_SIZE]="1g" [PIDS_LIMIT]="2048"
+  [RENDER_DEVICE]="/dev/dri/renderD128" [DNS_SERVER]="1.1.1.1" [DISPLAY_WIDTH]="1600" [DISPLAY_HEIGHT]="900"
+  [SHM_SIZE]="1g" [PIDS_LIMIT]="2048"
   [STEAM_1_WEB_PORT]="15901" [INSTANCE_1_OS_PASSWORD]="" [STEAM_1_CPUS]="3.0" [STEAM_1_MEM_LIMIT]="5g"
   [STEAM_2_WEB_PORT]="15902" [INSTANCE_2_OS_PASSWORD]="" [STEAM_2_CPUS]="3.0" [STEAM_2_MEM_LIMIT]="5g"
 )
@@ -136,6 +138,8 @@ PUID_VALUE="${values[PUID]}"
 PGID_VALUE="${values[PGID]}"
 RENDER_DEVICE_VALUE="${values[RENDER_DEVICE]}"
 DNS_SERVER_VALUE="${values[DNS_SERVER]}"
+DISPLAY_WIDTH_VALUE="${values[DISPLAY_WIDTH]}"
+DISPLAY_HEIGHT_VALUE="${values[DISPLAY_HEIGHT]}"
 SHM_SIZE_VALUE="${values[SHM_SIZE]}"
 PIDS_LIMIT_VALUE="${values[PIDS_LIMIT]}"
 STEAM_1_WEB_PORT_VALUE="${values[STEAM_1_WEB_PORT]}"
@@ -162,6 +166,16 @@ validate_ipv4() {
   done
 }
 validate_ipv4 DNS_SERVER "$DNS_SERVER_VALUE"
+
+validate_dimension() {
+  local name="$1" value="$2" minimum="$3" maximum="$4"
+  if [[ ! "$value" =~ ^(0|[1-9][0-9]*)$ ]] || \
+      (( 10#$value < minimum || 10#$value > maximum )); then
+    die "$name must be an integer between $minimum and $maximum."
+  fi
+}
+validate_dimension DISPLAY_WIDTH "$DISPLAY_WIDTH_VALUE" 640 3840
+validate_dimension DISPLAY_HEIGHT "$DISPLAY_HEIGHT_VALUE" 480 2160
 
 validate_password() {
   local name="$1" password="$2"
@@ -304,6 +318,8 @@ run_instance() {
     --env "TZ=$TZ_VALUE" \
     --env 'USER_LOCALES=en_US.UTF-8 UTF-8' \
     --env DISPLAY=:55 \
+    --env "DISPLAY_SIZEW=$DISPLAY_WIDTH_VALUE" \
+    --env "DISPLAY_SIZEH=$DISPLAY_HEIGHT_VALUE" \
     --env "PUID=$PUID_VALUE" \
     --env "PGID=$PGID_VALUE" \
     --env UMASK=022 \

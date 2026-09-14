@@ -66,7 +66,9 @@ Set `PUID`/`PGID` to the displayed IDs and put the two generated values in
 container account and VNC backend. Never put Steam credentials in `.env`.
 x11vnc uses only the first eight password characters, so those prefixes must
 differ. `DNS_SERVER` defaults to `1.1.1.1`; replace it with another reachable
-IPv4 recursive resolver if policy requires one.
+IPv4 recursive resolver if policy requires one. `DISPLAY_WIDTH` and
+`DISPLAY_HEIGHT` default to `1600x900`; set both in `.env` to lower the Xvfb
+screen resolution, for example `1280x720`. Existing `.env` files may omit them.
 
 ## Build and test one instance
 
