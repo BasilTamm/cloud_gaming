@@ -1,4 +1,4 @@
-FROM josh5/steam-headless@sha256:0d43c66ad0cf54cb0e51208b30f1f297d78264807661a581691224caa4dec0c0
+FROM docker.io/josh5/steam-headless@sha256:0d43c66ad0cf54cb0e51208b30f1f297d78264807661a581691224caa4dec0c0
 
 USER root
 
