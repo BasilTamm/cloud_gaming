@@ -7,31 +7,39 @@ Steam Deck under rootless Podman and be administered through noVNC in a browser.
 It uses ordinary `podman build/run/inspect`; **Podman Compose is not required**.
 
 The upstream Steam Headless image provides Steam, Proton support, Xfce,
-supervisord and noVNC. The local derivative adds the missing `Xvfb` package,
-preserves rootless GPU groups while dropping to the desktop UID, and requires
-VNC authentication. Each instance has its own bridge, home volume, game volume
-and loopback-only browser port. The launcher supplies an explicit recursive DNS
-upstream because the physically tested SteamOS Podman/Aardvark bridge could not
-resolve external names with its host-derived upstream configuration.
+supervisord and noVNC. The local derivative runs Xfce on Weston headless plus a
+rootful Xwayland display, preserves rootless GPU groups while dropping to the
+desktop UID, and requires VNC authentication. Each instance has its own bridge,
+home volume, game volume and loopback-only browser port. The launcher supplies
+an explicit recursive DNS upstream because the physically tested SteamOS
+Podman/Aardvark bridge could not resolve external names with its host-derived
+upstream configuration.
 
-No container has been run in the development environment. Vulkan/DXVK through
-framebuffer mode and GPU access on SteamOS remain unproved. Test one instance
-before starting the second.
+The previous Xvfb stack was tested on SteamOS: VNC, Steam, RADV and the game
+started, but DXVK exited with `No DRI3 support detected - required for
+presentation`. `PROTON_USE_WINED3D=1` made the game start through the slow
+OpenGL fallback, confirming that Xvfb presentation was the blocker. The new
+Xwayland stack has not yet been built or run on the target Steam Deck. Test one
+instance before starting the second.
 
-## Why framebuffer mode
+## Why Weston headless and Xwayland
 
 Upstream `primary` mode starts Xorg against a DRM card. Multiple primary X
 servers can contend for DRM master, including with the SteamOS desktop.
-`MODE=framebuffer` uses Xvfb and only `/dev/dri/renderD128`.
+The derivative instead uses Debian's `xwfb-run` to start Weston with its
+headless GL renderer and a rootful Xwayland screen on `/dev/dri/renderD128`.
+Xwayland provides the DRI3 presentation path that DXVK requires while Weston
+does not own a physical connector or DRM card node.
 
-Direct inspection of the pinned upstream image layer found `xserver-xorg-core`
-but no `/usr/bin/Xvfb`. The derivative Containerfile installs Debian's `xvfb`,
-`procps` and `util-linux` packages and verifies the required binaries.
+The image installs `weston`, `xwayland`, `xwayland-run`, `xauth`,
+`x11-utils`, and `libgl1-mesa-dri` explicitly. The healthcheck requires live
+Weston, Xwayland, x11vnc and Xfce processes and verifies both DRI3 and Present
+on the display before declaring the container healthy.
 
 This profile deliberately does **not** grant `/dev/dri/card0`, input devices,
 host network/IPC/PID, extra capabilities, privileged mode or unconfined
-security profiles. Xvfb does not provide accelerated GLX, so Proton may fail to
-present or may use software rendering despite access to the render node.
+security profiles. Whether Weston can select RADV and whether two independent
+instances can share one render node remain target-host acceptance tests.
 
 ## Prepare
 
@@ -67,8 +75,9 @@ container account and VNC backend. Never put Steam credentials in `.env`.
 x11vnc uses only the first eight password characters, so those prefixes must
 differ. `DNS_SERVER` defaults to `1.1.1.1`; replace it with another reachable
 IPv4 recursive resolver if policy requires one. `DISPLAY_WIDTH` and
-`DISPLAY_HEIGHT` default to `1600x900`; set both in `.env` to lower the Xvfb
-screen resolution, for example `1280x720`. Existing `.env` files may omit them.
+`DISPLAY_HEIGHT` default to `1600x900`; set both in `.env` to lower the
+headless Xwayland screen resolution, for example `1280x720`. Existing `.env`
+files may omit them.
 
 ## Build and test one instance
 
@@ -84,6 +93,27 @@ password, then log into Steam manually. Enable Steam Play/Proton and install
 Viking Rise. VNC/noVNC transport is not encrypted; keep the endpoint on host
 loopback or use an SSH tunnel from another machine.
 
+Before launching the game, remove the diagnostic
+`PROTON_USE_WINED3D=1` option and use DXVK again. `PROTON_LOG=1 %command%` may
+remain enabled while accepting the new display stack.
+
+Verify the accelerated Xwayland path inside the running container:
+
+```bash
+podman exec viking-rise-steam-1 sh -lc '
+  xdpyinfo | grep -E "DRI3|Present"
+  ps -C weston -C Xwayland -o pid,stat,etime,comm,args
+'
+```
+
+The expected extension list contains both `DRI3` and `Present`. If the
+container is unhealthy, inspect the compositor log before changing privileges:
+
+```bash
+podman exec viking-rise-steam-1 tail -n 120 \
+  /home/default/.cache/log/xwayland.err.log
+```
+
 Only after the first instance demonstrates usable Vulkan/Proton behavior:
 
 ```bash
@@ -97,7 +127,7 @@ Open <http://127.0.0.1:15902/> for the second instance.
 
 - `check`: validates `.env`, rootless local Podman, crun, cgroup v2, resource
   ranges, loopback ports and the DRM render node. It changes nothing.
-- `build`: builds `localhost/viking-rise-steam-headless:xvfb` from the pinned
+- `build`: builds `localhost/viking-rise-steam-headless:xwayland` from the pinned
   base digest. It does not read `.env` and does not start containers.
 - `up-one` / `up-two`: use only direct `podman run` calls. They require the
   image to have been built explicitly and recreate only labelled containers.
@@ -158,13 +188,16 @@ profiles, Proton prefixes and installed games.
 
 Before `up-two`, verify:
 
-1. `up-one` becomes healthy and `podman logs` shows no Xvfb/x11vnc failures.
+1. `up-one` becomes healthy and `podman logs` shows no Weston/Xwayland/x11vnc
+   failures.
 2. noVNC rejects a wrong password and accepts the configured one.
-3. Steam starts without render-node `EACCES` or llvmpipe fallback.
-4. Proton downloads and Viking Rise launches.
-5. `podman inspect viking-rise-steam-1` shows only renderD128, a private bridge,
+3. `xdpyinfo` reports `DRI3` and `Present` on display `:55`.
+4. Steam starts without render-node `EACCES` or llvmpipe fallback.
+5. With `PROTON_USE_WINED3D` removed, the Proton log selects RADV/DXVK and
+   Viking Rise remains open beyond its first frame.
+6. `podman inspect viking-rise-steam-1` shows only renderD128, a private bridge,
    loopback port 15901, the expected volumes and requested limits.
-6. Recreating the container preserves Steam state and installed game data.
+7. Recreating the container preserves Steam state and installed game data.
 
 If it fails, keep logs and treat that as a blocker. Do not add privileged
 mode, DRM card/input devices, host namespaces, broad capabilities or
@@ -172,7 +205,9 @@ unconfined profiles as a compatibility shortcut.
 
 ## Verification evidence
 
-Development-side checks cover shell syntax/lint, direct-command mock scenarios,
-exact option construction, env-parser failures, label guards and static package
-evidence. They do **not** cover a real Podman build/run, GPU, VNC/noVNC, audio,
-Proton, Viking Rise, persistence or concurrent sessions.
+Development-side checks cover shell syntax/lint, exact launcher option
+construction, env validation and Debian Trixie package file lists. Physical
+testing covered the old Xvfb stack, render-node access, VNC/noVNC, DNS, Steam,
+Proton/RADV detection and the WineD3D control run. It does **not** yet cover a
+real build/run of Weston + Xwayland, DRI3 on that display, DXVK presentation,
+audio on the new stack or concurrent sessions.

@@ -2,13 +2,25 @@ FROM docker.io/josh5/steam-headless@sha256:0d43c66ad0cf54cb0e51208b30f1f297d7826
 
 USER root
 
-# The pinned upstream image enables framebuffer mode through /usr/bin/Xvfb,
-# but its Debian image does not contain that binary. Add only the missing
-# package; do not import the privileges from upstream's host-oriented example.
+# Xvfb cannot expose DRI3, so DXVK can create a RADV device but cannot present
+# frames. xwfb-run replaces it with Weston headless plus rootful Xwayland. This
+# keeps the deployment render-node-only while giving Proton a DRI3 display.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends procps util-linux xvfb \
+    && apt-get install -y --no-install-recommends \
+      libgl1-mesa-dri \
+      procps \
+      util-linux \
+      weston \
+      x11-utils \
+      xauth \
+      xwayland \
+      xwayland-run \
     && rm -rf /var/lib/apt/lists/* \
-    && test -x /usr/bin/Xvfb \
+    && test -x /usr/bin/weston \
+    && test -x /usr/bin/Xwayland \
+    && test -x /usr/bin/xwfb-run \
+    && test -x /usr/bin/xdpyinfo \
+    && test -x /usr/bin/xauth \
     && test -x /usr/bin/setpriv
 
 COPY overlay/usr/local/bin/start-desktop-preserve-groups.sh /usr/local/bin/start-desktop-preserve-groups.sh
