@@ -13,7 +13,7 @@ if [[ "${1:-}" == "--env-file" ]]; then
 fi
 [[ $# -eq 0 ]] || { echo "ERROR: unexpected arguments: $*" >&2; exit 1; }
 
-readonly IMAGE="localhost/viking-rise-steam-headless:xvfb"
+readonly IMAGE="localhost/viking-rise-steam-headless:xwayland"
 readonly PROJECT_LABEL="io.openclaw.viking-rise.project"
 readonly PROJECT_VALUE="steam-headless"
 
@@ -28,7 +28,7 @@ Usage: ./steam-headless.sh ACTION [--env-file PATH]
 
 Actions:
   check     Validate the host and exact instance configuration.
-  build     Build the pinned derivative image containing Xvfb.
+  build     Build the pinned derivative image containing Weston + Xwayland.
   up-one    Recreate steam-1 and wait for container health.
   up-two    Recreate steam-2 after steam-1 has been accepted physically.
   down      Remove both managed containers and networks; preserve volumes.
@@ -161,8 +161,9 @@ validate_ipv4() {
   IFS=. read -r -a octets <<<"$value"
   [[ "${#octets[@]}" -eq 4 ]] || die "Invalid $name IPv4 address: $value"
   for octet in "${octets[@]}"; do
-    [[ "$octet" =~ ^(0|[1-9][0-9]{0,2})$ ]] && (( 10#$octet <= 255 )) || \
+    if [[ ! "$octet" =~ ^(0|[1-9][0-9]{0,2})$ ]] || (( 10#$octet > 255 )); then
       die "Invalid $name IPv4 address: $value"
+    fi
   done
 }
 validate_ipv4 DNS_SERVER "$DNS_SERVER_VALUE"
@@ -320,10 +321,11 @@ run_instance() {
     --env DISPLAY=:55 \
     --env "DISPLAY_SIZEW=$DISPLAY_WIDTH_VALUE" \
     --env "DISPLAY_SIZEH=$DISPLAY_HEIGHT_VALUE" \
+    --env XAUTHORITY=/tmp/.X11-unix/run/viking-rise-Xauthority \
     --env "PUID=$PUID_VALUE" \
     --env "PGID=$PGID_VALUE" \
     --env UMASK=022 \
-    --env MODE=framebuffer \
+    --env MODE=secondary \
     --env WEB_UI_MODE=vnc \
     --env ENABLE_VNC_AUDIO=true \
     --env PORT_NOVNC_WEB=8083 \

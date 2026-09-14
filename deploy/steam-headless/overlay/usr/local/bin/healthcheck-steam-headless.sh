@@ -11,7 +11,13 @@ has_process() {
   return 1
 }
 
-has_process Xvfb
+has_process weston
+has_process Xwayland
 has_process x11vnc
 has_process xfce4-session
+
+x_display="$(DISPLAY="${DISPLAY:-:55}" XAUTHORITY="${XAUTHORITY:-}" /usr/bin/xdpyinfo 2>/dev/null)"
+grep -Eq '^[[:space:]]*DRI3$' <<<"$x_display"
+grep -Eq '^[[:space:]]*Present$' <<<"$x_display"
+
 curl --fail --silent --show-error --max-time 2 "http://127.0.0.1:${PORT_NOVNC_WEB:-8083}/" >/dev/null
