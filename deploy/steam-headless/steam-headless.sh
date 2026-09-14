@@ -107,13 +107,13 @@ permissions="$(stat -c '%a' "$ENV_FILE")"
 [[ "$permissions" == "600" ]] || die "$ENV_FILE must have mode 600, not $permissions."
 
 declare -A allowed=(
-  [TZ]=1 [PUID]=1 [PGID]=1 [RENDER_DEVICE]=1 [SHM_SIZE]=1 [PIDS_LIMIT]=1
+  [TZ]=1 [PUID]=1 [PGID]=1 [RENDER_DEVICE]=1 [DNS_SERVER]=1 [SHM_SIZE]=1 [PIDS_LIMIT]=1
   [STEAM_1_WEB_PORT]=1 [INSTANCE_1_OS_PASSWORD]=1 [STEAM_1_CPUS]=1 [STEAM_1_MEM_LIMIT]=1
   [STEAM_2_WEB_PORT]=1 [INSTANCE_2_OS_PASSWORD]=1 [STEAM_2_CPUS]=1 [STEAM_2_MEM_LIMIT]=1
 )
 declare -A values=(
   [TZ]="Etc/UTC" [PUID]="$(id -u)" [PGID]="$(id -g)"
-  [RENDER_DEVICE]="/dev/dri/renderD128" [SHM_SIZE]="1g" [PIDS_LIMIT]="2048"
+  [RENDER_DEVICE]="/dev/dri/renderD128" [DNS_SERVER]="1.1.1.1" [SHM_SIZE]="1g" [PIDS_LIMIT]="2048"
   [STEAM_1_WEB_PORT]="15901" [INSTANCE_1_OS_PASSWORD]="" [STEAM_1_CPUS]="3.0" [STEAM_1_MEM_LIMIT]="5g"
   [STEAM_2_WEB_PORT]="15902" [INSTANCE_2_OS_PASSWORD]="" [STEAM_2_CPUS]="3.0" [STEAM_2_MEM_LIMIT]="5g"
 )
@@ -135,6 +135,7 @@ TZ_VALUE="${values[TZ]}"
 PUID_VALUE="${values[PUID]}"
 PGID_VALUE="${values[PGID]}"
 RENDER_DEVICE_VALUE="${values[RENDER_DEVICE]}"
+DNS_SERVER_VALUE="${values[DNS_SERVER]}"
 SHM_SIZE_VALUE="${values[SHM_SIZE]}"
 PIDS_LIMIT_VALUE="${values[PIDS_LIMIT]}"
 STEAM_1_WEB_PORT_VALUE="${values[STEAM_1_WEB_PORT]}"
@@ -149,6 +150,18 @@ STEAM_2_MEM_LIMIT_VALUE="${values[STEAM_2_MEM_LIMIT]}"
 [[ "$TZ_VALUE" =~ ^[A-Za-z0-9_+./-]+$ && "$TZ_VALUE" != *..* ]] || die "Invalid TZ: $TZ_VALUE"
 [[ "$PUID_VALUE" == "$(id -u)" ]] || die "PUID must equal invoking UID $(id -u)."
 [[ "$PGID_VALUE" == "$(id -g)" ]] || die "PGID must equal invoking primary GID $(id -g)."
+
+validate_ipv4() {
+  local name="$1" value="$2" octet
+  local -a octets
+  IFS=. read -r -a octets <<<"$value"
+  [[ "${#octets[@]}" -eq 4 ]] || die "Invalid $name IPv4 address: $value"
+  for octet in "${octets[@]}"; do
+    [[ "$octet" =~ ^(0|[1-9][0-9]{0,2})$ ]] && (( 10#$octet <= 255 )) || \
+      die "Invalid $name IPv4 address: $value"
+  done
+}
+validate_ipv4 DNS_SERVER "$DNS_SERVER_VALUE"
 
 validate_password() {
   local name="$1" password="$2"
@@ -281,6 +294,7 @@ run_instance() {
     --label "$PROJECT_LABEL=$PROJECT_VALUE" \
     --label "io.openclaw.viking-rise.instance=steam-$instance" \
     --network "$network" \
+    --dns "$DNS_SERVER_VALUE" \
     --device "$RENDER_DEVICE_VALUE:$RENDER_DEVICE_VALUE" \
     --group-add keep-groups \
     --publish "127.0.0.1:$port:8083" \

@@ -10,7 +10,9 @@ The upstream Steam Headless image provides Steam, Proton support, Xfce,
 supervisord and noVNC. The local derivative adds the missing `Xvfb` package,
 preserves rootless GPU groups while dropping to the desktop UID, and requires
 VNC authentication. Each instance has its own bridge, home volume, game volume
-and loopback-only browser port.
+and loopback-only browser port. The launcher supplies an explicit recursive DNS
+upstream because the physically tested SteamOS Podman/Aardvark bridge could not
+resolve external names with its host-derived upstream configuration.
 
 No container has been run in the development environment. Vulkan/DXVK through
 framebuffer mode and GPU access on SteamOS remain unproved. Test one instance
@@ -63,7 +65,8 @@ Set `PUID`/`PGID` to the displayed IDs and put the two generated values in
 `INSTANCE_1_OS_PASSWORD` and `INSTANCE_2_OS_PASSWORD`. They protect the local
 container account and VNC backend. Never put Steam credentials in `.env`.
 x11vnc uses only the first eight password characters, so those prefixes must
-differ.
+differ. `DNS_SERVER` defaults to `1.1.1.1`; replace it with another reachable
+IPv4 recursive resolver if policy requires one.
 
 ## Build and test one instance
 
@@ -133,6 +136,9 @@ profiles, Proton prefixes and installed games.
 - Only a canonical DRM render node (major 226, minor 128+) is accepted.
 - Resource overrides have bounded ranges. Their actual enforcement must still
   be inspected after launch; named-volume disk growth is unbounded.
+- The private bridge's Aardvark DNS proxy forwards external queries to the
+  configured `DNS_SERVER` instead of its broken host-derived upstream. This
+  does not expose a host port or grant a host network namespace.
 - The VNC password is passed to Podman through a temporary mode-600 env file,
   not as a command-line value. It remains visible to the invoking user through
   container inspection because the upstream image consumes `USER_PASSWORD`.
