@@ -45,6 +45,20 @@ openssl rand -hex 16
 openssl rand -hex 16
 ```
 
+The only container CLI dependency is ordinary Podman. Do **not** run
+`podman compose version` and do not install `podman-compose`: this profile
+does not use a Compose provider. Verify the required host tools with:
+
+```bash
+podman --version
+crun --version
+```
+
+If Podman prints `No Compose provider is available through podman compose`,
+then a `podman compose ...` command was invoked outside this launcher. Use the
+commands in this document instead; `steam-headless.sh` calls only
+`podman build`, `podman run`, `podman inspect` and related direct commands.
+
 Set `PUID`/`PGID` to the displayed IDs and put the two generated values in
 `INSTANCE_1_OS_PASSWORD` and `INSTANCE_2_OS_PASSWORD`. They protect the local
 container account and VNC backend. Never put Steam credentials in `.env`.

@@ -45,3 +45,6 @@ image. A small pinned derivative adds the `Xvfb` binary missing from upstream's
 framebuffer path, preserves rootless render groups across the desktop privilege
 drop, and enables VNC authentication. Its verdict remains **PARTIAL** until
 Vulkan/Proton is tested on a real Steam Deck.
+
+This alternative uses ordinary `podman` commands directly. It does not require
+or invoke `podman compose`, Docker Compose, or `podman-compose`.
